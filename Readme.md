@@ -1,5 +1,9 @@
 # tui-treelistview
 
+[![CI](https://github.com/hexqnt/tui-treelistview/actions/workflows/ci.yml/badge.svg)](https://github.com/hexqnt/tui-treelistview/actions/workflows/ci.yml)
+[![crates.io](https://img.shields.io/crates/v/tui-treelistview.svg)](https://crates.io/crates/tui-treelistview)
+[![docs.rs](https://docs.rs/tui-treelistview/badge.svg)](https://docs.rs/tui-treelistview)
+
 A tree-list widget for Ratatui.
 
 Specialization: this widget is less about passive tree rendering and more about full interaction with tree data (navigate, toggle, reorder, add, rename, delete), so it fits editing workflows as much as browsing.
