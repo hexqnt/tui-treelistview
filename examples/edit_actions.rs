@@ -8,6 +8,8 @@ use tui_treelistview::{
     TreeListViewState, TreeListViewStyle, TreeModel, TreeRowContext,
 };
 
+type Action = TreeAction<()>;
+
 // Small editable tree with explicit parent/children lists.
 #[derive(Clone)]
 struct Model {
@@ -134,10 +136,10 @@ fn main() {
     let mut clipboard: Option<usize> = None;
 
     // Move selected node up, then yank and paste under root.
-    state.handle_edit_action(&mut model, TreeAction::ReorderUp, &mut clipboard);
-    state.handle_edit_action(&mut model, TreeAction::YankNode, &mut clipboard);
+    state.handle_edit_action(&mut model, Action::ReorderUp, &mut clipboard);
+    state.handle_edit_action(&mut model, Action::YankNode, &mut clipboard);
     state.select_by_id(&model, 0);
-    state.handle_edit_action(&mut model, TreeAction::PasteNode, &mut clipboard);
+    state.handle_edit_action(&mut model, Action::PasteNode, &mut clipboard);
 
     // Render to a buffer to keep the example terminal-free.
     let style = TreeListViewStyle::default();
