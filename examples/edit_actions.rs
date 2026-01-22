@@ -5,7 +5,7 @@ use ratatui::widgets::{Cell, StatefulWidget};
 
 use tui_treelistview::{
     SimpleColumns, TreeAction, TreeEdit, TreeGlyphs, TreeLabelRenderer, TreeListView,
-    TreeListViewState, TreeModel, TreeRowContext, TreeListViewStyle,
+    TreeListViewState, TreeListViewStyle, TreeModel, TreeRowContext,
 };
 
 // Small editable tree with explicit parent/children lists.

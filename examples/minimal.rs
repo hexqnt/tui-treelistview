@@ -4,8 +4,8 @@ use ratatui::prelude::Buffer;
 use ratatui::widgets::StatefulWidget;
 
 use tui_treelistview::{
-    SimpleColumns, TreeGlyphs, TreeLabelRenderer, TreeListView, TreeListViewState, TreeModel,
-    TreeRowContext, TreeListViewStyle,
+    SimpleColumns, TreeGlyphs, TreeLabelRenderer, TreeListView, TreeListViewState,
+    TreeListViewStyle, TreeModel, TreeRowContext,
 };
 
 // Simple in-memory tree model with fixed children lists.

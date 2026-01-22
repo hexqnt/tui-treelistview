@@ -6,7 +6,7 @@ use ratatui::widgets::{Cell, StatefulWidget};
 
 use tui_treelistview::{
     SimpleColumns, TreeAction, TreeGlyphs, TreeLabelRenderer, TreeListView, TreeListViewState,
-    TreeModel, TreeRowContext, TreeListViewStyle,
+    TreeListViewStyle, TreeModel, TreeRowContext,
 };
 
 // Minimal model: root with three children and string labels.

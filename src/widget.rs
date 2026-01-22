@@ -243,7 +243,13 @@ where
             let constraints = self
                 .columns
                 .constraints_for_area(table_block.inner(table_area));
-            (table_area, table_block, constraints, header.clone(), Some(scrollbar_area))
+            (
+                table_area,
+                table_block,
+                constraints,
+                header.clone(),
+                Some(scrollbar_area),
+            )
         } else {
             let constraints = self.columns.constraints_for_area(block.inner(area));
             (area, block, constraints, header, None)
