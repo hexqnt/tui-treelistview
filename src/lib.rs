@@ -1,3 +1,10 @@
+//! Tree list view widget for ratatui with filtering, marking, and optional key/edit handling.
+//!
+//! Feature flags:
+//! - `keymap`: crossterm-based key bindings and `TreeListViewState::handle_key*` helpers.
+//! - `edit`: `TreeEdit` trait and edit-action helpers.
+//! - `serde`: serde support for `TreeListViewSnapshot`.
+
 mod action;
 mod columns;
 mod context;

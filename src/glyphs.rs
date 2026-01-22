@@ -6,19 +6,29 @@ use ratatui::widgets::Cell;
 use crate::context::TreeRowContext;
 use crate::model::TreeModel;
 
+/// Glyph set used to render the tree structure and expanders.
 #[derive(Clone, Copy)]
 pub struct TreeGlyphs<'a> {
+    /// Indentation for empty levels.
     pub indent: &'a str,
+    /// Branch glyph for the last child.
     pub branch_last: &'a str,
+    /// Branch glyph for intermediate children.
     pub branch: &'a str,
+    /// Vertical continuation glyph.
     pub vert: &'a str,
+    /// Empty spacer glyph (used when no line is drawn).
     pub empty: &'a str,
+    /// Leaf glyph for nodes without children.
     pub leaf: &'a str,
+    /// Expander glyph for expanded nodes.
     pub expanded: &'a str,
+    /// Expander glyph for collapsed nodes.
     pub collapsed: &'a str,
 }
 
 impl TreeGlyphs<'static> {
+    /// Returns a Unicode glyph set.
     pub const fn unicode() -> Self {
         Self {
             indent: "   ",
@@ -32,6 +42,7 @@ impl TreeGlyphs<'static> {
         }
     }
 
+    /// Returns an ASCII-only glyph set.
     pub const fn ascii() -> Self {
         Self {
             indent: "   ",
@@ -46,17 +57,24 @@ impl TreeGlyphs<'static> {
     }
 }
 
+/// Label parts: name with an optional prefix (e.g., marker or icon).
 #[derive(Clone)]
 pub struct TreeLabelPrefix<'a> {
+    /// Node display name.
     pub name: &'a str,
+    /// Optional prefix rendered before the name.
     pub prefix: Option<Cow<'a, str>>,
 }
 
+/// Provides label parts for a node.
 pub trait TreeLabelProvider<T: TreeModel> {
+    /// Returns name and optional prefix for the node.
     fn label_parts<'a>(&'a self, model: &'a T, id: T::Id) -> TreeLabelPrefix<'a>;
 }
 
+/// Renders a node into a `Cell` for the label column.
 pub trait TreeLabelRenderer<T: TreeModel> {
+    /// Builds the label cell for the given node.
     fn cell<'a>(
         &'a self,
         model: &'a T,
@@ -83,6 +101,7 @@ where
     }
 }
 
+/// Builds a `Line` for the tree label, including guides and expanders.
 pub fn tree_label_line<'a>(
     ctx: &TreeRowContext<'_>,
     parts: TreeLabelPrefix<'a>,
@@ -162,6 +181,8 @@ pub fn tree_label_line<'a>(
     Line::from(name_spans)
 }
 
+/// Convenience wrapper to build a label `Cell` from the label `Line`.
+#[inline]
 pub fn tree_name_cell<'a>(
     ctx: &TreeRowContext<'_>,
     parts: TreeLabelPrefix<'a>,

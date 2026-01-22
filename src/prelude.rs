@@ -1,3 +1,4 @@
+/// Prelude re-exporting the most commonly used types.
 pub use crate::{
     AdaptiveColumns, ColumnDef, ColumnFn, ColumnWidth, NoFilter, SimpleColumns, TreeAction,
     TreeColumns, TreeColumnsLayout, TreeEvent, TreeFilter, TreeFilterConfig, TreeGlyphs,

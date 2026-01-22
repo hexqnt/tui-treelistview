@@ -2,14 +2,19 @@ use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 use crate::action::TreeAction;
 
+/// Navigation key profiles.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub enum KeymapProfile {
+    /// Arrow keys plus Vim-like alternatives.
     #[default]
     Default,
+    /// Vim-only navigation (h/j/k/l).
     Vim,
+    /// Arrow-only navigation.
     Arrows,
 }
 
+/// Key bindings resolver for tree actions.
 #[derive(Clone, Copy, Debug)]
 pub struct TreeKeyBindings {
     profile: KeymapProfile,
@@ -22,25 +27,31 @@ impl Default for TreeKeyBindings {
 }
 
 impl TreeKeyBindings {
+    /// Creates bindings with the default profile.
     pub const fn new() -> Self {
         Self {
             profile: KeymapProfile::Default,
         }
     }
 
+    /// Creates bindings with a specific profile.
     pub const fn with_profile(profile: KeymapProfile) -> Self {
         Self { profile }
     }
 
+    /// Returns the current keymap profile.
     pub const fn profile(&self) -> KeymapProfile {
         self.profile
     }
 
+    /// Sets the active keymap profile.
     pub const fn set_profile(&mut self, profile: KeymapProfile) {
         self.profile = profile;
     }
 
+    /// Resolves a key event into a tree action.
     pub fn resolve<C>(&self, key: KeyEvent) -> Option<TreeAction<C>> {
+        // Shift-modified shortcuts take priority over profile navigation.
         if key.modifiers.contains(KeyModifiers::SHIFT) {
             match key.code {
                 KeyCode::Up => return Some(TreeAction::ReorderUp),
@@ -62,6 +73,7 @@ impl TreeKeyBindings {
         self.resolve_common(key)
     }
 
+    /// Resolves a key event with a custom mapping first.
     pub fn resolve_with<C, F>(&self, key: KeyEvent, custom: F) -> Option<TreeAction<C>>
     where
         F: Fn(KeyEvent) -> Option<C>,

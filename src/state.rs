@@ -19,6 +19,7 @@ use crate::keymap::TreeKeyBindings;
 #[cfg(feature = "keymap")]
 use crossterm::event::KeyEvent;
 
+/// A visible node row with metadata used for rendering and navigation.
 #[derive(Clone)]
 pub struct VisibleNode<Id> {
     pub(crate) id: Id,
@@ -27,13 +28,17 @@ pub struct VisibleNode<Id> {
     pub(crate) is_tail_stack: SmallVec<[bool; 8]>,
 }
 
-/// Состояние виджета: развёрнутые узлы, выделение, кеши видимости и меток.
+/// Widget state: expanded nodes, selection, and visibility/mark caches.
 pub struct TreeListViewState<Id> {
     list_state: TableState,
+    // Track expansion by (parent, id) to keep it tied to a specific path (e.g., after moves).
     expanded: FxHashSet<(Option<Id>, Id)>,
+    // Cached visible rows to avoid recomputing DFS every render.
     visible_nodes: Vec<VisibleNode<Id>>,
+    // Marks whether visible_nodes must be rebuilt.
     dirty: bool,
     manual_marked: FxHashSet<Id>,
+    // Cached effective marks (propagated from children).
     effective_marked: FxHashSet<Id>,
     marks_dirty: bool,
     draw_lines: bool,
@@ -41,15 +46,23 @@ pub struct TreeListViewState<Id> {
     keymap: TreeKeyBindings,
 }
 
+/// Snapshot of state (selection, expansion, marks).
+///
+/// With the `serde` feature enabled, this type derives `Serialize`/`Deserialize`.
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[derive(Clone, Debug)]
-/// Сериализуемый снимок состояния (выбор, развёрнутые узлы, метки).
 pub struct TreeListViewSnapshot<Id> {
+    /// Expanded nodes as `(parent, id)` pairs.
     pub expanded: Vec<(Option<Id>, Id)>,
+    /// Nodes explicitly marked by the user.
     pub manual_marked: Vec<Id>,
+    /// Selected row index in the visible list.
     pub selected: Option<usize>,
+    /// Selected column index in the table state.
     pub selected_column: Option<usize>,
+    /// Scroll offset within the visible list.
     pub offset: usize,
+    /// Whether guide lines were enabled.
     pub draw_lines: bool,
 }
 
@@ -60,10 +73,12 @@ impl<Id: Copy + Eq + Hash> Default for TreeListViewState<Id> {
 }
 
 impl<Id: Copy + Eq + Hash> TreeListViewState<Id> {
+    /// Creates a new empty state with default capacity.
     pub fn new() -> Self {
         Self::with_capacity(0)
     }
 
+    /// Creates a state with preallocated capacity for the given number of nodes.
     pub fn with_capacity(capacity: usize) -> Self {
         Self {
             list_state: TableState::default(),
@@ -80,6 +95,7 @@ impl<Id: Copy + Eq + Hash> TreeListViewState<Id> {
     }
 
     #[cfg(feature = "keymap")]
+    /// Returns a mutable reference to the key binding set.
     pub const fn keymap_mut(&mut self) -> &mut TreeKeyBindings {
         &mut self.keymap
     }
@@ -100,17 +116,20 @@ impl<Id: Copy + Eq + Hash> TreeListViewState<Id> {
         self.expanded.contains(&(parent, id))
     }
 
+    /// Captures a snapshot of the current state for persistence or restore.
     pub fn snapshot(&self) -> TreeListViewSnapshot<Id> {
         TreeListViewSnapshot {
             expanded: self.expanded.iter().copied().collect(),
             manual_marked: self.manual_marked.iter().copied().collect(),
             selected: self.list_state.selected(),
+            // Keep column and offset so TableState restores precisely.
             selected_column: self.list_state.selected_column(),
             offset: self.list_state.offset(),
             draw_lines: self.draw_lines,
         }
     }
 
+    /// Restores state from a previously captured snapshot.
     pub fn restore(&mut self, snapshot: TreeListViewSnapshot<Id>) {
         self.expanded = snapshot.expanded.into_iter().collect();
         self.manual_marked = snapshot.manual_marked.into_iter().collect();
@@ -122,39 +141,49 @@ impl<Id: Copy + Eq + Hash> TreeListViewState<Id> {
         self.marks_dirty = true;
     }
 
+    /// Returns whether guide lines are drawn.
+    #[inline]
     pub const fn draw_lines(&self) -> bool {
         self.draw_lines
     }
 
+    /// Enables or disables drawing of guide lines.
     pub const fn set_draw_lines(&mut self, draw: bool) {
         self.draw_lines = draw;
     }
 
+    /// Marks the visible-node cache as dirty.
     pub const fn invalidate(&mut self) {
         self.dirty = true;
     }
 
+    /// Marks both visible-node and mark caches as dirty.
     pub const fn invalidate_all(&mut self) {
         self.dirty = true;
         self.marks_dirty = true;
     }
 
+    /// Selects the first visible row.
     pub const fn select_first(&mut self) {
         self.list_state.select_first();
     }
 
+    /// Selects the last visible row.
     pub const fn select_last(&mut self) {
         self.list_state.select_last();
     }
 
+    /// Scrolls the view down by the given number of rows.
     pub fn scroll_down_by(&mut self, amount: u16) {
         self.list_state.scroll_down_by(amount);
     }
 
+    /// Scrolls the view up by the given number of rows.
     pub fn scroll_up_by(&mut self, amount: u16) {
         self.list_state.scroll_up_by(amount);
     }
 
+    /// Moves selection to the previous visible row.
     pub fn select_prev(&mut self) {
         if self.visible_nodes.is_empty() {
             self.list_state.select(None);
@@ -164,6 +193,7 @@ impl<Id: Copy + Eq + Hash> TreeListViewState<Id> {
         self.list_state.select(Some(selected.saturating_sub(1)));
     }
 
+    /// Moves selection to the next visible row.
     pub fn select_next(&mut self) {
         if self.visible_nodes.is_empty() {
             self.list_state.select(None);
@@ -174,6 +204,7 @@ impl<Id: Copy + Eq + Hash> TreeListViewState<Id> {
         self.list_state.select(Some(new_selected));
     }
 
+    /// Adjusts scroll offset so the selection is within the viewport.
     pub fn ensure_selection_visible(&mut self, viewport_height: usize) {
         self.clamp_selection();
         let Some(selected) = self.list_state.selected() else {
@@ -188,6 +219,7 @@ impl<Id: Copy + Eq + Hash> TreeListViewState<Id> {
         }
     }
 
+    /// Adjusts selection visibility according to the provided scroll policy.
     pub fn ensure_selection_visible_with_policy(
         &mut self,
         viewport_height: usize,
@@ -213,6 +245,7 @@ impl<Id: Copy + Eq + Hash> TreeListViewState<Id> {
             return;
         }
 
+        // Center selection, then clamp to valid scroll range.
         let half = viewport_height / 2;
         let mut offset = selected.saturating_sub(half);
         let max_offset = total.saturating_sub(viewport_height);
@@ -222,28 +255,33 @@ impl<Id: Copy + Eq + Hash> TreeListViewState<Id> {
         *self.list_state.offset_mut() = offset;
     }
 
+    /// Returns the id of the currently selected node, if any.
     pub fn selected_id(&self) -> Option<Id> {
         self.list_state
             .selected()
             .and_then(|idx| self.visible_nodes.get(idx).map(|node| node.id))
     }
 
+    /// Returns the parent id of the currently selected node, if any.
     pub fn selected_parent_id(&self) -> Option<Id> {
         self.list_state
             .selected()
             .and_then(|idx| self.visible_nodes.get(idx).and_then(|node| node.parent))
     }
 
+    /// Returns the number of visible nodes in the current view.
     pub const fn visible_len(&self) -> usize {
         self.visible_nodes.len()
     }
 
+    /// Returns the depth level of the currently selected node.
     pub fn selected_level(&self) -> Option<u16> {
         self.list_state
             .selected()
             .and_then(|idx| self.visible_nodes.get(idx).map(|node| node.level))
     }
 
+    /// Returns whether the selected node is expanded (or `None` if nothing is selected).
     pub fn selected_is_expanded<T: TreeModel<Id = Id>>(&self, model: &T) -> Option<bool> {
         self.list_state.selected().and_then(|idx| {
             self.visible_nodes.get(idx).map(|node| {
@@ -256,6 +294,7 @@ impl<Id: Copy + Eq + Hash> TreeListViewState<Id> {
         })
     }
 
+    /// Expands the tree to the node and selects it if present.
     pub fn select_by_id<T: TreeModel<Id = Id>>(&mut self, model: &T, id: Id) -> bool {
         let _ = self.expand_to(model, id);
         self.ensure_visible_nodes(model);
@@ -267,12 +306,14 @@ impl<Id: Copy + Eq + Hash> TreeListViewState<Id> {
         }
     }
 
+    /// Expands the tree to the node and returns whether it becomes visible.
     pub fn ensure_visible_id<T: TreeModel<Id = Id>>(&mut self, model: &T, id: Id) -> bool {
         let _ = self.expand_to(model, id);
         self.ensure_visible_nodes(model);
         self.visible_nodes.iter().any(|node| node.id == id)
     }
 
+    /// Expands all ancestors of the node so it becomes visible.
     pub fn expand_to<T: TreeModel<Id = Id>>(&mut self, model: &T, id: Id) -> bool {
         let Some(path) = Self::find_path_to(model, id) else {
             return false;
@@ -286,6 +327,7 @@ impl<Id: Copy + Eq + Hash> TreeListViewState<Id> {
         true
     }
 
+    /// Expands all nodes in the model.
     pub fn expand_all<T: TreeModel<Id = Id>>(&mut self, model: &T) {
         self.expanded.clear();
         if let Some(root) = model.root() {
@@ -303,11 +345,13 @@ impl<Id: Copy + Eq + Hash> TreeListViewState<Id> {
         self.dirty = true;
     }
 
+    /// Collapses all nodes.
     pub fn collapse_all(&mut self) {
         self.expanded.clear();
         self.dirty = true;
     }
 
+    /// Ensures the visible node list is up to date (if marked dirty).
     pub fn ensure_visible_nodes<T: TreeModel<Id = Id>>(&mut self, model: &T) {
         if !self.dirty {
             return;
@@ -315,6 +359,7 @@ impl<Id: Copy + Eq + Hash> TreeListViewState<Id> {
         self.update_visible_nodes(model);
     }
 
+    /// Ensures the visible node list is up to date with an active filter.
     pub fn ensure_visible_nodes_filtered<T, F>(
         &mut self,
         model: &T,
@@ -351,11 +396,13 @@ impl<Id: Copy + Eq + Hash> TreeListViewState<Id> {
         self.clamp_selection();
     }
 
+    /// Recomputes effective marks for the current view.
     pub fn ensure_mark_cache<T: TreeModel<Id = Id>>(&mut self, model: &T) {
         if !self.marks_dirty {
             return;
         }
 
+        // Memoize subtree mark results to avoid repeated walks.
         let mut memo: FxHashMap<Id, bool> = FxHashMap::default();
         let mut seeds = FxHashSet::with_capacity_and_hasher(
             self.visible_nodes.len() + self.manual_marked.len() + 1,
@@ -382,10 +429,13 @@ impl<Id: Copy + Eq + Hash> TreeListViewState<Id> {
         self.marks_dirty = false;
     }
 
+    /// Returns `true` if the node is effectively marked.
+    #[inline]
     pub fn node_is_marked(&self, node_id: Id) -> bool {
         self.effective_marked.contains(&node_id)
     }
 
+    /// Removes marks that refer to nodes no longer in the model.
     pub fn prune_removed_marks<T: TreeModel<Id = Id>>(&mut self, model: &T) {
         self.manual_marked
             .retain(|node_id| model.contains(*node_id));
@@ -394,6 +444,7 @@ impl<Id: Copy + Eq + Hash> TreeListViewState<Id> {
         self.marks_dirty = true;
     }
 
+    /// Handles a tree action and returns the resulting event.
     pub fn handle_action<T: TreeModel<Id = Id>, C>(
         &mut self,
         model: &T,
@@ -403,6 +454,7 @@ impl<Id: Copy + Eq + Hash> TreeListViewState<Id> {
         self.handle_action_inner(model, action)
     }
 
+    /// Handles a tree action with filtering enabled and returns the resulting event.
     pub fn handle_action_filtered<T, F, C>(
         &mut self,
         model: &T,
@@ -419,6 +471,7 @@ impl<Id: Copy + Eq + Hash> TreeListViewState<Id> {
     }
 
     #[cfg(feature = "edit")]
+    /// Applies edit actions to a mutable model and updates state.
     pub fn handle_edit_action<T: TreeEdit<Id = Id>, C>(
         &mut self,
         model: &mut T,
@@ -515,6 +568,7 @@ impl<Id: Copy + Eq + Hash> TreeListViewState<Id> {
     }
 
     #[cfg(feature = "keymap")]
+    /// Resolves a key event into an action and handles it.
     pub fn handle_key<T: TreeModel<Id = Id>>(&mut self, model: &T, key: KeyEvent) -> TreeEvent<()> {
         self.ensure_visible_nodes(model);
         let Some(action) = self.keymap.resolve(key) else {
@@ -524,6 +578,7 @@ impl<Id: Copy + Eq + Hash> TreeListViewState<Id> {
     }
 
     #[cfg(feature = "keymap")]
+    /// Resolves a key event with a custom mapping and handles it.
     pub fn handle_key_with<T, C, F>(&mut self, model: &T, key: KeyEvent, custom: F) -> TreeEvent<C>
     where
         T: TreeModel<Id = Id>,
@@ -537,6 +592,7 @@ impl<Id: Copy + Eq + Hash> TreeListViewState<Id> {
     }
 
     #[cfg(feature = "keymap")]
+    /// Resolves a key event with filtering enabled and handles it.
     pub fn handle_key_filtered<T, F>(
         &mut self,
         model: &T,
@@ -556,6 +612,7 @@ impl<Id: Copy + Eq + Hash> TreeListViewState<Id> {
     }
 
     #[cfg(feature = "keymap")]
+    /// Resolves a key event with filtering and custom mapping enabled and handles it.
     pub fn handle_key_filtered_with<T, F, C, R>(
         &mut self,
         model: &T,
@@ -659,6 +716,7 @@ impl<Id: Copy + Eq + Hash> TreeListViewState<Id> {
         }
     }
 
+    /// Toggles expansion state for the given node.
     pub fn toggle(&mut self, node_id: Id, parent: Option<Id>) {
         let key = (parent, node_id);
         if self.expanded.contains(&key) {
@@ -669,6 +727,7 @@ impl<Id: Copy + Eq + Hash> TreeListViewState<Id> {
         self.dirty = true;
     }
 
+    /// Sets expansion state for the given node.
     pub fn set_expanded(&mut self, node_id: Id, parent: Option<Id>, expand: bool) {
         let key = (parent, node_id);
         if expand {
@@ -872,6 +931,7 @@ impl<Id: Copy + Eq + Hash> TreeListViewState<Id> {
             return cached;
         }
 
+        // Mark is true if explicitly set or if all children are marked.
         let result = if self.manual_marked.contains(&node_id) {
             true
         } else {
@@ -944,6 +1004,7 @@ impl<Id: Copy + Eq + Hash> TreeListViewState<Id> {
                 }
             }
 
+            // Prefer children that themselves have descendants.
             for idx in selected_idx + 1..self.visible_nodes.len() {
                 let candidate = &self.visible_nodes[idx];
                 let candidate_level = candidate.level;
@@ -957,6 +1018,7 @@ impl<Id: Copy + Eq + Hash> TreeListViewState<Id> {
             }
         }
 
+        // Fallback: pick the next node in the subtree that has children.
         for idx in selected_idx + 1..self.visible_nodes.len() {
             let candidate = &self.visible_nodes[idx];
             if candidate.level < level {

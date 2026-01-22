@@ -1,34 +1,53 @@
-/// Действия, которые может инициировать пользователь/приложение над деревом.
+/// Actions that a user or application can initiate on the tree view.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum TreeAction<Custom = ()> {
+    /// Move the selected node up within its siblings.
     ReorderUp,
+    /// Move the selected node down within its siblings.
     ReorderDown,
+    /// Move selection to the previous visible row.
     SelectPrev,
+    /// Move selection to the next visible row.
     SelectNext,
+    /// Move selection to the parent node.
     SelectParent,
+    /// Expand the selection; if possible, move to an expandable descendant.
     SelectChild,
+    /// Toggle expansion recursively for the selected subtree.
     ToggleRecursive,
+    /// Toggle expansion for the selected node only.
     ToggleNode,
+    /// Request adding a child under the selected node.
     AddChild,
+    /// Request editing the selected node.
     EditNode,
-    /// Удалить связь с родителем (узел может остаться в дереве, если он разделяемый).
+    /// Detach the node from its parent without deleting it.
     DetachNode,
-    /// Полное удаление узла из дерева.
+    /// Delete the node from the tree entirely.
     DeleteNode,
+    /// Store the selected node id in the clipboard.
     YankNode,
+    /// Paste the clipboard node as a child of the selected node.
     PasteNode,
+    /// Toggle drawing of guide lines.
     ToggleGuides,
+    /// Toggle the mark state for the selected node.
     ToggleMark,
+    /// Select the first visible row.
     SelectFirst,
+    /// Select the last visible row.
     SelectLast,
-    /// Пользовательское действие (пробрасывается наружу без обработки внутри виджета).
+    /// Custom action forwarded to the caller without internal handling.
     Custom(Custom),
 }
 
-/// Результат обработки действия/клавиши.
+/// Result of handling an action or key event.
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum TreeEvent<Custom = ()> {
+    /// The action was handled internally and state was updated.
     Handled,
+    /// The action was ignored (e.g., nothing selected / nothing to do).
     Unhandled,
+    /// The action is forwarded to the caller for handling.
     Action(TreeAction<Custom>),
 }

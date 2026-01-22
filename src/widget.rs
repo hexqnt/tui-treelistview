@@ -13,7 +13,7 @@ use crate::model::{NoFilter, TreeFilter, TreeFilterConfig, TreeModel};
 use crate::state::{TreeListViewState, VisibleNode};
 use crate::style::TreeListViewStyle;
 
-/// Основной виджет дерева (table + stateful).
+/// Main tree list view widget (table + stateful).
 pub struct TreeListView<'a, T, L, C, F = NoFilter>
 where
     T: TreeModel,
@@ -36,6 +36,7 @@ where
     L: TreeLabelRenderer<T>,
     C: TreeColumns<T>,
 {
+    /// Creates a new tree list view with the default glyph set and no filter.
     pub const fn new(
         model: &'a T,
         label: &'a L,
@@ -53,11 +54,13 @@ where
         }
     }
 
+    /// Sets the glyph set used to render tree guides and expanders.
     pub const fn glyphs(mut self, glyphs: TreeGlyphs<'a>) -> Self {
         self.glyphs = glyphs;
         self
     }
 
+    /// Enables filtering with the provided filter and configuration.
     pub fn with_filter<F>(
         self,
         filter: F,
@@ -146,6 +149,7 @@ where
         inner_height: usize,
         scroll_rows: usize,
     ) {
+        // Add 1 so the scrollbar is never zero-length.
         let scroll_len = scroll_rows.saturating_add(1);
         let position = state
             .list_state()
@@ -206,6 +210,7 @@ where
 
         let scroll_rows = total_rows.saturating_sub(inner_height);
 
+        // Use a local TableState when virtualizing to map selection into the slice.
         let mut local_state = if self.style.virtualize_rows {
             Some(*state.list_state())
         } else {
