@@ -82,3 +82,14 @@ cargo run --example demo --features keymap,edit -- ./ 3
 ```
 
 Keys: arrows/hjkl navigate, Enter toggle, Shift+Up/Down reorder, Del/d detach, Shift+Del or S delete, y/p move, a add, e rename, q/Esc quit.
+
+## Path to Release
+
+- Different node identifier types.
+- Move a node up one nesting level.
+- Insert a node in the correct position.
+- Insert multiple nodes at once.
+- Horizontal scrolling.
+- Columns before the main column.
+- Free cursor movement between columns.
+- Prebuilt mappings for popular tree storage structures.
