@@ -25,6 +25,7 @@ pub struct VisibleNode<Id> {
     pub(crate) id: Id,
     pub(crate) level: u16,
     pub(crate) parent: Option<Id>,
+    pub(crate) has_children: bool,
     pub(crate) is_tail_stack: SmallVec<[bool; 8]>,
 }
 
@@ -35,6 +36,8 @@ pub struct TreeListViewState<Id> {
     expanded: FxHashSet<(Option<Id>, Id)>,
     // Cached visible rows to avoid recomputing DFS every render.
     visible_nodes: Vec<VisibleNode<Id>>,
+    // Fast lookup from node id to visible row index.
+    visible_index: FxHashMap<Id, usize>,
     // Marks whether visible_nodes must be rebuilt.
     dirty: bool,
     manual_marked: FxHashSet<Id>,
@@ -84,6 +87,7 @@ impl<Id: Copy + Eq + Hash> TreeListViewState<Id> {
             list_state: TableState::default(),
             expanded: FxHashSet::with_capacity_and_hasher(capacity, FxBuildHasher),
             visible_nodes: Vec::with_capacity(capacity),
+            visible_index: FxHashMap::with_capacity_and_hasher(capacity, FxBuildHasher),
             dirty: true,
             manual_marked: FxHashSet::with_capacity_and_hasher(capacity, FxBuildHasher),
             effective_marked: FxHashSet::with_capacity_and_hasher(capacity, FxBuildHasher),
@@ -110,6 +114,10 @@ impl<Id: Copy + Eq + Hash> TreeListViewState<Id> {
 
     pub(crate) fn visible_nodes(&self) -> &[VisibleNode<Id>] {
         &self.visible_nodes
+    }
+
+    fn visible_index_of(&self, id: Id) -> Option<usize> {
+        self.visible_index.get(&id).copied()
     }
 
     pub(crate) fn is_expanded(&self, parent: Option<Id>, id: Id) -> bool {
@@ -282,13 +290,13 @@ impl<Id: Copy + Eq + Hash> TreeListViewState<Id> {
     }
 
     /// Returns whether the selected node is expanded (or `None` if nothing is selected).
-    pub fn selected_is_expanded<T: TreeModel<Id = Id>>(&self, model: &T) -> Option<bool> {
+    pub fn selected_is_expanded<T: TreeModel<Id = Id>>(&self, _model: &T) -> Option<bool> {
         self.list_state.selected().and_then(|idx| {
             self.visible_nodes.get(idx).map(|node| {
-                if model.children(node.id).is_empty() {
-                    false
-                } else {
+                if node.has_children {
                     self.expanded.contains(&(node.parent, node.id))
+                } else {
+                    false
                 }
             })
         })
@@ -298,7 +306,7 @@ impl<Id: Copy + Eq + Hash> TreeListViewState<Id> {
     pub fn select_by_id<T: TreeModel<Id = Id>>(&mut self, model: &T, id: Id) -> bool {
         let _ = self.expand_to(model, id);
         self.ensure_visible_nodes(model);
-        if let Some(idx) = self.visible_nodes.iter().position(|node| node.id == id) {
+        if let Some(idx) = self.visible_index_of(id) {
             self.list_state.select(Some(idx));
             true
         } else {
@@ -310,7 +318,7 @@ impl<Id: Copy + Eq + Hash> TreeListViewState<Id> {
     pub fn ensure_visible_id<T: TreeModel<Id = Id>>(&mut self, model: &T, id: Id) -> bool {
         let _ = self.expand_to(model, id);
         self.ensure_visible_nodes(model);
-        self.visible_nodes.iter().any(|node| node.id == id)
+        self.visible_index.contains_key(&id)
     }
 
     /// Expands all ancestors of the node so it becomes visible.
@@ -330,8 +338,17 @@ impl<Id: Copy + Eq + Hash> TreeListViewState<Id> {
     /// Expands all nodes in the model.
     pub fn expand_all<T: TreeModel<Id = Id>>(&mut self, model: &T) {
         self.expanded.clear();
+        let hint = model.size_hint();
+        if hint > 0 {
+            let extra = hint.saturating_sub(self.expanded.capacity());
+            if extra > 0 {
+                self.expanded.reserve(extra);
+            }
+        }
         if let Some(root) = model.root() {
-            let mut stack = vec![(None, root)];
+            let stack_capacity = hint.max(1);
+            let mut stack = Vec::with_capacity(stack_capacity);
+            stack.push((None, root));
             while let Some((parent, node)) = stack.pop() {
                 let children = model.children(node);
                 if !children.is_empty() {
@@ -378,9 +395,13 @@ impl<Id: Copy + Eq + Hash> TreeListViewState<Id> {
         }
 
         self.visible_nodes.clear();
+        self.visible_index.clear();
+        self.reserve_visible_capacity(model);
         if let Some(root) = model.root() {
             let mut is_tail_stack: SmallVec<[bool; 8]> = SmallVec::new();
-            let mut memo: FxHashMap<Id, bool> = FxHashMap::default();
+            let memo_capacity = model.size_hint().max(1);
+            let mut memo: FxHashMap<Id, bool> =
+                FxHashMap::with_capacity_and_hasher(memo_capacity, FxBuildHasher);
             self.build_visible_nodes_filtered(
                 model,
                 root,
@@ -403,11 +424,11 @@ impl<Id: Copy + Eq + Hash> TreeListViewState<Id> {
         }
 
         // Memoize subtree mark results to avoid repeated walks.
-        let mut memo: FxHashMap<Id, bool> = FxHashMap::default();
-        let mut seeds = FxHashSet::with_capacity_and_hasher(
-            self.visible_nodes.len() + self.manual_marked.len() + 1,
-            FxBuildHasher,
-        );
+        let seeds_capacity = self.visible_nodes.len() + self.manual_marked.len() + 1;
+        let memo_capacity = model.size_hint().max(seeds_capacity);
+        let mut memo: FxHashMap<Id, bool> =
+            FxHashMap::with_capacity_and_hasher(memo_capacity, FxBuildHasher);
+        let mut seeds = FxHashSet::with_capacity_and_hasher(seeds_capacity, FxBuildHasher);
 
         for node in &self.visible_nodes {
             seeds.insert(node.id);
@@ -487,11 +508,7 @@ impl<Id: Copy + Eq + Hash> TreeListViewState<Id> {
                 {
                     self.invalidate();
                     self.ensure_visible_nodes(model);
-                    if let Some(idx) = self
-                        .visible_nodes
-                        .iter()
-                        .position(|node| node.id == node_id)
-                    {
+                    if let Some(idx) = self.visible_index_of(node_id) {
                         self.list_state.select(Some(idx));
                     }
                     return true;
@@ -505,11 +522,7 @@ impl<Id: Copy + Eq + Hash> TreeListViewState<Id> {
                 {
                     self.invalidate();
                     self.ensure_visible_nodes(model);
-                    if let Some(idx) = self
-                        .visible_nodes
-                        .iter()
-                        .position(|node| node.id == node_id)
-                    {
+                    if let Some(idx) = self.visible_index_of(node_id) {
                         self.list_state.select(Some(idx));
                     }
                     return true;
@@ -561,6 +574,14 @@ impl<Id: Copy + Eq + Hash> TreeListViewState<Id> {
                     return true;
                 }
                 false
+            }
+            TreeAction::ExpandAll => {
+                self.expand_all(model);
+                true
+            }
+            TreeAction::CollapseAll => {
+                self.collapse_all();
+                true
             }
             TreeAction::Custom(_) => false,
             _ => false,
@@ -664,26 +685,35 @@ impl<Id: Copy + Eq + Hash> TreeListViewState<Id> {
                 TreeEvent::Handled
             }
             TreeAction::ToggleRecursive => {
-                if let Some(node_id) = self.selected_id()
-                    && self.has_children(model, node_id)
+                if let Some(selected_idx) = self.list_state.selected()
+                    && let Some(node) = self.visible_nodes.get(selected_idx)
+                    && node.has_children
                 {
-                    let parent = self.selected_parent_id();
-                    let should_expand = !self.expanded.contains(&(parent, node_id));
-                    self.set_expanded_recursive(model, node_id, parent, should_expand);
+                    let parent = node.parent;
+                    let should_expand = !self.expanded.contains(&(parent, node.id));
+                    self.set_expanded_recursive(model, node.id, parent, should_expand);
                     self.dirty = true;
                     return TreeEvent::Handled;
                 }
                 TreeEvent::Unhandled
             }
             TreeAction::ToggleNode => {
-                if let Some(node_id) = self.selected_id()
-                    && self.has_children(model, node_id)
+                if let Some(selected_idx) = self.list_state.selected()
+                    && let Some(node) = self.visible_nodes.get(selected_idx)
+                    && node.has_children
                 {
-                    let parent = self.selected_parent_id();
-                    self.toggle(node_id, parent);
+                    self.toggle(node.id, node.parent);
                     return TreeEvent::Handled;
                 }
                 TreeEvent::Unhandled
+            }
+            TreeAction::ExpandAll => {
+                self.expand_all(model);
+                TreeEvent::Handled
+            }
+            TreeAction::CollapseAll => {
+                self.collapse_all();
+                TreeEvent::Handled
             }
             TreeAction::ToggleGuides => {
                 self.draw_lines = !self.draw_lines;
@@ -711,8 +741,8 @@ impl<Id: Copy + Eq + Hash> TreeListViewState<Id> {
             | TreeAction::DetachNode
             | TreeAction::DeleteNode
             | TreeAction::YankNode
-            | TreeAction::PasteNode => TreeEvent::Action(action),
-            TreeAction::Custom(_) => TreeEvent::Action(action),
+            | TreeAction::PasteNode
+            | TreeAction::Custom(_) => TreeEvent::Action(action),
         }
     }
 
@@ -738,12 +768,25 @@ impl<Id: Copy + Eq + Hash> TreeListViewState<Id> {
         self.dirty = true;
     }
 
-    fn has_children<T: TreeModel<Id = Id>>(&self, model: &T, node_id: Id) -> bool {
-        !model.children(node_id).is_empty()
+    fn reserve_visible_capacity<T: TreeModel<Id = Id>>(&mut self, model: &T) {
+        let hint = model.size_hint();
+        if hint == 0 {
+            return;
+        }
+        let node_extra = hint.saturating_sub(self.visible_nodes.capacity());
+        if node_extra > 0 {
+            self.visible_nodes.reserve(node_extra);
+        }
+        let index_extra = hint.saturating_sub(self.visible_index.capacity());
+        if index_extra > 0 {
+            self.visible_index.reserve(index_extra);
+        }
     }
 
     fn update_visible_nodes<T: TreeModel<Id = Id>>(&mut self, model: &T) {
         self.visible_nodes.clear();
+        self.visible_index.clear();
+        self.reserve_visible_capacity(model);
         if let Some(root) = model.root() {
             let mut is_tail_stack: SmallVec<[bool; 8]> = SmallVec::new();
             self.build_visible_nodes(model, root, 0, None, &mut is_tail_stack);
@@ -790,19 +833,23 @@ impl<Id: Copy + Eq + Hash> TreeListViewState<Id> {
         parent: Option<Id>,
         is_tail_stack: &mut SmallVec<[bool; 8]>,
     ) {
+        let children = model.children(node_id);
+        let has_children = !children.is_empty();
+        let idx = self.visible_nodes.len();
         self.visible_nodes.push(VisibleNode {
             id: node_id,
             level,
             parent,
+            has_children,
             is_tail_stack: is_tail_stack.clone(),
         });
+        self.visible_index.insert(node_id, idx);
 
-        let is_expanded = self.expanded.contains(&(parent, node_id));
+        let is_expanded = has_children && self.expanded.contains(&(parent, node_id));
         if !is_expanded {
             return;
         }
 
-        let children = model.children(node_id);
         for (i, child) in children.iter().copied().enumerate() {
             let is_last = i == children.len().saturating_sub(1);
             is_tail_stack.push(is_last);
@@ -857,6 +904,7 @@ impl<Id: Copy + Eq + Hash> TreeListViewState<Id> {
     {
         let self_match = filter.is_match(model, node_id);
         let children = model.children(node_id);
+        let has_children = !children.is_empty();
 
         let mut visible_children: SmallVec<[Id; 8]> = SmallVec::new();
         for child in children.iter().copied() {
@@ -870,12 +918,15 @@ impl<Id: Copy + Eq + Hash> TreeListViewState<Id> {
             return false;
         }
 
+        let idx = self.visible_nodes.len();
         self.visible_nodes.push(VisibleNode {
             id: node_id,
             level,
             parent,
+            has_children,
             is_tail_stack: is_tail_stack.clone(),
         });
+        self.visible_index.insert(node_id, idx);
 
         let expand_children = config.auto_expand || self.expanded.contains(&(parent, node_id));
         if expand_children && !visible_children.is_empty() {
@@ -963,11 +1014,7 @@ impl<Id: Copy + Eq + Hash> TreeListViewState<Id> {
             return;
         };
 
-        if let Some(parent_idx) = self
-            .visible_nodes
-            .iter()
-            .position(|node| node.id == parent_id)
-        {
+        if let Some(parent_idx) = self.visible_index_of(parent_id) {
             self.list_state.select(Some(parent_idx));
         }
     }
@@ -983,17 +1030,13 @@ impl<Id: Copy + Eq + Hash> TreeListViewState<Id> {
         let mut level = selected_node.level;
         let parent_id = selected_node.parent;
 
-        if self.has_children(model, node_id) {
+        if selected_node.has_children {
             let expand_key = (parent_id, node_id);
             if self.expanded.insert(expand_key) {
                 self.dirty = true;
                 self.update_visible_nodes(model);
 
-                if let Some(current_idx) = self
-                    .visible_nodes
-                    .iter()
-                    .position(|node| node.id == node_id)
-                {
+                if let Some(current_idx) = self.visible_index_of(node_id) {
                     selected_idx = current_idx;
                     if let Some(node) = self.visible_nodes.get(current_idx) {
                         level = node.level;
@@ -1011,7 +1054,7 @@ impl<Id: Copy + Eq + Hash> TreeListViewState<Id> {
                 if candidate_level <= level {
                     break;
                 }
-                if candidate_level == level + 1 && self.has_children(model, candidate.id) {
+                if candidate_level == level + 1 && candidate.has_children {
                     self.list_state.select(Some(idx));
                     return;
                 }
@@ -1024,7 +1067,7 @@ impl<Id: Copy + Eq + Hash> TreeListViewState<Id> {
             if candidate.level < level {
                 break;
             }
-            if self.has_children(model, candidate.id) {
+            if candidate.has_children {
                 self.list_state.select(Some(idx));
                 return;
             }

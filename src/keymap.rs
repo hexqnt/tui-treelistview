@@ -119,6 +119,8 @@ impl TreeKeyBindings {
         match key.code {
             KeyCode::Char(' ') => Some(TreeAction::ToggleRecursive),
             KeyCode::Enter => Some(TreeAction::ToggleNode),
+            KeyCode::Char('E') => Some(TreeAction::ExpandAll),
+            KeyCode::Char('C') => Some(TreeAction::CollapseAll),
             KeyCode::Char('a' | '+') => Some(TreeAction::AddChild),
             KeyCode::Char('e') => Some(TreeAction::EditNode),
             KeyCode::Delete | KeyCode::Char('d') => Some(TreeAction::DetachNode),

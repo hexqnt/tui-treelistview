@@ -96,7 +96,7 @@ where
     ) -> Vec<Row<'a>> {
         let mut rows = Vec::with_capacity(nodes.len());
         for node in nodes {
-            let has_children = !self.model.children(node.id).is_empty();
+            let has_children = node.has_children;
             let is_expanded = state.is_expanded(node.parent, node.id);
             let is_marked = state.node_is_marked(node.id);
             let ctx = TreeRowContext {

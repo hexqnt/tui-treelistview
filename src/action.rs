@@ -17,6 +17,10 @@ pub enum TreeAction<Custom = ()> {
     ToggleRecursive,
     /// Toggle expansion for the selected node only.
     ToggleNode,
+    /// Expand all nodes in the tree.
+    ExpandAll,
+    /// Collapse all nodes in the tree.
+    CollapseAll,
     /// Request adding a child under the selected node.
     AddChild,
     /// Request editing the selected node.

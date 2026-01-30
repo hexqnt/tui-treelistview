@@ -81,7 +81,7 @@ Interactive demo (path + depth):
 cargo run --example demo --features keymap,edit -- ./ 3
 ```
 
-Keys: arrows/hjkl navigate, Enter toggle, Shift+Up/Down reorder, Del/d detach, Shift+Del or S delete, y/p move, a add, e rename, q/Esc quit.
+Keys: arrows/hjkl navigate, Enter toggle, E expand all, C collapse all, Shift+Up/Down reorder, Del/d detach, Shift+Del or S delete, y/p move, a add, e rename, q/Esc quit.
 
 ## Path to Release
 
