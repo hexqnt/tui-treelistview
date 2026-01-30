@@ -135,3 +135,26 @@ impl TreeKeyBindings {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn resolve_expand_collapse_keys() {
+        let bindings = TreeKeyBindings::new();
+
+        let expand = KeyEvent::new(KeyCode::Char('E'), KeyModifiers::NONE);
+        let collapse = KeyEvent::new(KeyCode::Char('C'), KeyModifiers::NONE);
+        let edit = KeyEvent::new(KeyCode::Char('e'), KeyModifiers::NONE);
+        let lowercase_c = KeyEvent::new(KeyCode::Char('c'), KeyModifiers::NONE);
+
+        assert_eq!(bindings.resolve::<()>(expand), Some(TreeAction::ExpandAll));
+        assert_eq!(
+            bindings.resolve::<()>(collapse),
+            Some(TreeAction::CollapseAll)
+        );
+        assert_eq!(bindings.resolve::<()>(edit), Some(TreeAction::EditNode));
+        assert_eq!(bindings.resolve::<()>(lowercase_c), None);
+    }
+}

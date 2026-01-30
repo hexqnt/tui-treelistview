@@ -1189,4 +1189,48 @@ mod tests {
         assert!(state.visible_nodes.is_empty());
         assert_eq!(state.list_state.selected(), None);
     }
+
+    #[test]
+    fn expand_all_action_expands_and_collapses() {
+        let tree = TestTree::new();
+        let mut state = TreeListViewState::<usize>::new();
+
+        let event = state.handle_action(&tree, TreeAction::<()>::ExpandAll);
+        assert!(matches!(event, TreeEvent::Handled));
+        state.ensure_visible_nodes(&tree);
+
+        let ids: Vec<_> = state.visible_nodes.iter().map(|n| n.id).collect();
+        assert_eq!(ids, vec![0, 1, 3, 4, 2]);
+
+        let event = state.handle_action(&tree, TreeAction::<()>::CollapseAll);
+        assert!(matches!(event, TreeEvent::Handled));
+        state.ensure_visible_nodes(&tree);
+
+        let ids: Vec<_> = state.visible_nodes.iter().map(|n| n.id).collect();
+        assert_eq!(ids, vec![0]);
+    }
+
+    #[test]
+    fn visible_nodes_cache_has_children() {
+        let tree = TestTree::new();
+        let mut state = TreeListViewState::<usize>::new();
+
+        state.set_expanded(0, None, true);
+        state.set_expanded(1, Some(0), true);
+        state.ensure_visible_nodes(&tree);
+
+        let has_children = |id: usize| {
+            state
+                .visible_nodes
+                .iter()
+                .find(|node| node.id == id)
+                .map(|node| node.has_children)
+        };
+
+        assert_eq!(has_children(0), Some(true));
+        assert_eq!(has_children(1), Some(true));
+        assert_eq!(has_children(2), Some(false));
+        assert_eq!(has_children(3), Some(false));
+        assert_eq!(has_children(4), Some(false));
+    }
 }
