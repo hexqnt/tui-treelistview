@@ -9,7 +9,7 @@ use smallvec::SmallVec;
 use crate::columns::TreeColumns;
 use crate::context::TreeRowContext;
 use crate::glyphs::{TreeGlyphs, TreeLabelRenderer};
-use crate::model::{NoFilter, TreeFilter, TreeFilterConfig, TreeModel};
+use crate::model::{NoFilter, ParsedFilterConfig, TreeFilter, TreeFilterConfig, TreeModel};
 use crate::state::{TreeListViewState, VisibleNode};
 use crate::style::TreeListViewStyle;
 
@@ -174,10 +174,11 @@ where
     type State = TreeListViewState<T::Id>;
 
     fn render(self, area: Rect, buf: &mut Buffer, state: &mut Self::State) {
-        if self.filter_config.enabled {
-            state.ensure_visible_nodes_filtered(self.model, &self.filter, self.filter_config);
-        } else {
-            state.ensure_visible_nodes(self.model);
+        match self.filter_config.parsed() {
+            ParsedFilterConfig::Disabled => state.ensure_visible_nodes(self.model),
+            ParsedFilterConfig::Enabled { .. } => {
+                state.ensure_visible_nodes_filtered(self.model, &self.filter, self.filter_config);
+            }
         }
         state.ensure_mark_cache(self.model);
 

@@ -48,6 +48,12 @@ pub struct TreeFilterConfig {
     pub auto_expand: bool,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ParsedFilterConfig {
+    Disabled,
+    Enabled { auto_expand: bool },
+}
+
 impl TreeFilterConfig {
     /// Creates a configuration with filtering disabled.
     pub const fn disabled() -> Self {
@@ -62,6 +68,16 @@ impl TreeFilterConfig {
         Self {
             enabled: true,
             auto_expand: true,
+        }
+    }
+
+    pub(crate) const fn parsed(self) -> ParsedFilterConfig {
+        if self.enabled {
+            ParsedFilterConfig::Enabled {
+                auto_expand: self.auto_expand,
+            }
+        } else {
+            ParsedFilterConfig::Disabled
         }
     }
 }

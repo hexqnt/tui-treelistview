@@ -1,6 +1,6 @@
 [package]
 name = "tui-treelistview"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2024"
 license = "MIT OR Apache-2.0"
 description = "Interactive tree list widget for Ratatui"
@@ -35,7 +35,7 @@ name = "edit_actions"
 required-features = ["edit"]
 
 [dev-dependencies]
-chrono = "0.4.43"
+chrono = "0.4.44"
 
 [lints.clippy]
 all = "warn"

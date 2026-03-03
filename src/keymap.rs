@@ -62,15 +62,15 @@ impl TreeKeyBindings {
         }
 
         let nav_action = match self.profile {
-            KeymapProfile::Default => self.resolve_default_nav(key),
-            KeymapProfile::Vim => self.resolve_vim_nav(key),
-            KeymapProfile::Arrows => self.resolve_arrow_nav(key),
+            KeymapProfile::Default => Self::resolve_default_nav(key),
+            KeymapProfile::Vim => Self::resolve_vim_nav(key),
+            KeymapProfile::Arrows => Self::resolve_arrow_nav(key),
         };
         if nav_action.is_some() {
             return nav_action;
         }
 
-        self.resolve_common(key)
+        Self::resolve_common(key)
     }
 
     /// Resolves a key event with a custom mapping first.
@@ -85,7 +85,7 @@ impl TreeKeyBindings {
         self.resolve(key)
     }
 
-    const fn resolve_default_nav<C>(&self, key: KeyEvent) -> Option<TreeAction<C>> {
+    const fn resolve_default_nav<C>(key: KeyEvent) -> Option<TreeAction<C>> {
         match key.code {
             KeyCode::Up | KeyCode::Char('k') => Some(TreeAction::SelectPrev),
             KeyCode::Down | KeyCode::Char('j') => Some(TreeAction::SelectNext),
@@ -95,7 +95,7 @@ impl TreeKeyBindings {
         }
     }
 
-    const fn resolve_vim_nav<C>(&self, key: KeyEvent) -> Option<TreeAction<C>> {
+    const fn resolve_vim_nav<C>(key: KeyEvent) -> Option<TreeAction<C>> {
         match key.code {
             KeyCode::Char('k') => Some(TreeAction::SelectPrev),
             KeyCode::Char('j') => Some(TreeAction::SelectNext),
@@ -105,7 +105,7 @@ impl TreeKeyBindings {
         }
     }
 
-    const fn resolve_arrow_nav<C>(&self, key: KeyEvent) -> Option<TreeAction<C>> {
+    const fn resolve_arrow_nav<C>(key: KeyEvent) -> Option<TreeAction<C>> {
         match key.code {
             KeyCode::Up => Some(TreeAction::SelectPrev),
             KeyCode::Down => Some(TreeAction::SelectNext),
@@ -115,7 +115,7 @@ impl TreeKeyBindings {
         }
     }
 
-    fn resolve_common<C>(&self, key: KeyEvent) -> Option<TreeAction<C>> {
+    const fn resolve_common<C>(key: KeyEvent) -> Option<TreeAction<C>> {
         match key.code {
             KeyCode::Char(' ') => Some(TreeAction::ToggleRecursive),
             KeyCode::Enter => Some(TreeAction::ToggleNode),

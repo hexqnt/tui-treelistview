@@ -5,7 +5,7 @@ use rustc_hash::{FxBuildHasher, FxHashMap, FxHashSet};
 use smallvec::SmallVec;
 
 use crate::action::{TreeAction, TreeEvent};
-use crate::model::{TreeFilter, TreeFilterConfig, TreeModel};
+use crate::model::{ParsedFilterConfig, TreeFilter, TreeFilterConfig, TreeModel};
 use crate::style::TreeScrollPolicy;
 
 #[cfg(feature = "serde")]
@@ -29,11 +29,43 @@ pub struct VisibleNode<Id> {
     pub(crate) is_tail_stack: SmallVec<[bool; 8]>,
 }
 
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+struct ExpansionPath<Id> {
+    parent: Option<Id>,
+    id: Id,
+}
+
+impl<Id> ExpansionPath<Id> {
+    const fn new(parent: Option<Id>, id: Id) -> Self {
+        Self { parent, id }
+    }
+}
+
+impl<Id> From<(Option<Id>, Id)> for ExpansionPath<Id> {
+    fn from((parent, id): (Option<Id>, Id)) -> Self {
+        Self::new(parent, id)
+    }
+}
+
+impl<Id> From<ExpansionPath<Id>> for (Option<Id>, Id) {
+    fn from(value: ExpansionPath<Id>) -> Self {
+        (value.parent, value.id)
+    }
+}
+
+#[derive(Clone, Copy)]
+struct SelectedNode<Id> {
+    id: Id,
+    parent: Option<Id>,
+    level: u16,
+    has_children: bool,
+}
+
 /// Widget state: expanded nodes, selection, and visibility/mark caches.
 pub struct TreeListViewState<Id> {
     list_state: TableState,
     // Track expansion by (parent, id) to keep it tied to a specific path (e.g., after moves).
-    expanded: FxHashSet<(Option<Id>, Id)>,
+    expanded: FxHashSet<ExpansionPath<Id>>,
     // Cached visible rows to avoid recomputing DFS every render.
     visible_nodes: Vec<VisibleNode<Id>>,
     // Fast lookup from node id to visible row index.
@@ -120,14 +152,34 @@ impl<Id: Copy + Eq + Hash> TreeListViewState<Id> {
         self.visible_index.get(&id).copied()
     }
 
+    const fn expansion_path(parent: Option<Id>, id: Id) -> ExpansionPath<Id> {
+        ExpansionPath::new(parent, id)
+    }
+
+    fn selected_node(&self) -> Option<SelectedNode<Id>> {
+        let index = self.list_state.selected()?;
+        let node = self.visible_nodes.get(index)?;
+        Some(SelectedNode {
+            id: node.id,
+            parent: node.parent,
+            level: node.level,
+            has_children: node.has_children,
+        })
+    }
+
+    fn selected_node_with_parent(&self) -> Option<(Id, Id)> {
+        let node = self.selected_node()?;
+        Some((node.id, node.parent?))
+    }
+
     pub(crate) fn is_expanded(&self, parent: Option<Id>, id: Id) -> bool {
-        self.expanded.contains(&(parent, id))
+        self.expanded.contains(&Self::expansion_path(parent, id))
     }
 
     /// Captures a snapshot of the current state for persistence or restore.
     pub fn snapshot(&self) -> TreeListViewSnapshot<Id> {
         TreeListViewSnapshot {
-            expanded: self.expanded.iter().copied().collect(),
+            expanded: self.expanded.iter().copied().map(Into::into).collect(),
             manual_marked: self.manual_marked.iter().copied().collect(),
             selected: self.list_state.selected(),
             // Keep column and offset so TableState restores precisely.
@@ -139,7 +191,7 @@ impl<Id: Copy + Eq + Hash> TreeListViewState<Id> {
 
     /// Restores state from a previously captured snapshot.
     pub fn restore(&mut self, snapshot: TreeListViewSnapshot<Id>) {
-        self.expanded = snapshot.expanded.into_iter().collect();
+        self.expanded = snapshot.expanded.into_iter().map(Into::into).collect();
         self.manual_marked = snapshot.manual_marked.into_iter().collect();
         self.draw_lines = snapshot.draw_lines;
         *self.list_state.offset_mut() = snapshot.offset;
@@ -265,16 +317,12 @@ impl<Id: Copy + Eq + Hash> TreeListViewState<Id> {
 
     /// Returns the id of the currently selected node, if any.
     pub fn selected_id(&self) -> Option<Id> {
-        self.list_state
-            .selected()
-            .and_then(|idx| self.visible_nodes.get(idx).map(|node| node.id))
+        self.selected_node().map(|node| node.id)
     }
 
     /// Returns the parent id of the currently selected node, if any.
     pub fn selected_parent_id(&self) -> Option<Id> {
-        self.list_state
-            .selected()
-            .and_then(|idx| self.visible_nodes.get(idx).and_then(|node| node.parent))
+        self.selected_node().and_then(|node| node.parent)
     }
 
     /// Returns the number of visible nodes in the current view.
@@ -284,22 +332,13 @@ impl<Id: Copy + Eq + Hash> TreeListViewState<Id> {
 
     /// Returns the depth level of the currently selected node.
     pub fn selected_level(&self) -> Option<u16> {
-        self.list_state
-            .selected()
-            .and_then(|idx| self.visible_nodes.get(idx).map(|node| node.level))
+        self.selected_node().map(|node| node.level)
     }
 
     /// Returns whether the selected node is expanded (or `None` if nothing is selected).
     pub fn selected_is_expanded<T: TreeModel<Id = Id>>(&self, _model: &T) -> Option<bool> {
-        self.list_state.selected().and_then(|idx| {
-            self.visible_nodes.get(idx).map(|node| {
-                if node.has_children {
-                    self.expanded.contains(&(node.parent, node.id))
-                } else {
-                    false
-                }
-            })
-        })
+        let node = self.selected_node()?;
+        Some(node.has_children && self.is_expanded(node.parent, node.id))
     }
 
     /// Expands the tree to the node and selects it if present.
@@ -328,7 +367,7 @@ impl<Id: Copy + Eq + Hash> TreeListViewState<Id> {
         };
         for (parent, node) in path {
             if !model.children(node).is_empty() {
-                self.expanded.insert((parent, node));
+                self.expanded.insert(Self::expansion_path(parent, node));
             }
         }
         self.dirty = true;
@@ -352,7 +391,7 @@ impl<Id: Copy + Eq + Hash> TreeListViewState<Id> {
             while let Some((parent, node)) = stack.pop() {
                 let children = model.children(node);
                 if !children.is_empty() {
-                    self.expanded.insert((parent, node));
+                    self.expanded.insert(Self::expansion_path(parent, node));
                     for child in children.iter().copied() {
                         stack.push((Some(node), child));
                     }
@@ -389,10 +428,10 @@ impl<Id: Copy + Eq + Hash> TreeListViewState<Id> {
         if !self.dirty {
             return;
         }
-        if !config.enabled {
+        let ParsedFilterConfig::Enabled { auto_expand } = config.parsed() else {
             self.update_visible_nodes(model);
             return;
-        }
+        };
 
         self.visible_nodes.clear();
         self.visible_index.clear();
@@ -409,7 +448,7 @@ impl<Id: Copy + Eq + Hash> TreeListViewState<Id> {
                 None,
                 &mut is_tail_stack,
                 filter,
-                config,
+                auto_expand,
                 &mut memo,
             );
         }
@@ -502,8 +541,7 @@ impl<Id: Copy + Eq + Hash> TreeListViewState<Id> {
         self.ensure_visible_nodes(model);
         match action {
             TreeAction::ReorderUp => {
-                if let Some(node_id) = self.selected_id()
-                    && let Some(parent_id) = self.selected_parent_id()
+                if let Some((node_id, parent_id)) = self.selected_node_with_parent()
                     && model.move_child_up(parent_id, node_id)
                 {
                     self.invalidate();
@@ -516,8 +554,7 @@ impl<Id: Copy + Eq + Hash> TreeListViewState<Id> {
                 false
             }
             TreeAction::ReorderDown => {
-                if let Some(node_id) = self.selected_id()
-                    && let Some(parent_id) = self.selected_parent_id()
+                if let Some((node_id, parent_id)) = self.selected_node_with_parent()
                     && model.move_child_down(parent_id, node_id)
                 {
                     self.invalidate();
@@ -530,16 +567,14 @@ impl<Id: Copy + Eq + Hash> TreeListViewState<Id> {
                 false
             }
             TreeAction::DetachNode => {
-                if let Some(node_id) = self.selected_id() {
+                if let Some((node_id, parent_id)) = self.selected_node_with_parent() {
                     if model.is_root(node_id) {
                         return false;
                     }
-                    if let Some(parent_id) = self.selected_parent_id() {
-                        model.remove_child(parent_id, node_id);
-                        self.prune_removed_marks(model);
-                        self.invalidate_all();
-                        return true;
-                    }
+                    model.remove_child(parent_id, node_id);
+                    self.prune_removed_marks(model);
+                    self.invalidate_all();
+                    return true;
                 }
                 false
             }
@@ -567,7 +602,7 @@ impl<Id: Copy + Eq + Hash> TreeListViewState<Id> {
             }
             TreeAction::PasteNode => {
                 if let Some(node_id) = *clipboard
-                    && let Some(parent_id) = self.selected_id()
+                    && let Some(parent_id) = self.selected_node().map(|node| node.id)
                 {
                     model.add_child(parent_id, node_id);
                     self.invalidate_all();
@@ -583,7 +618,6 @@ impl<Id: Copy + Eq + Hash> TreeListViewState<Id> {
                 self.collapse_all();
                 true
             }
-            TreeAction::Custom(_) => false,
             _ => false,
         }
     }
@@ -685,21 +719,18 @@ impl<Id: Copy + Eq + Hash> TreeListViewState<Id> {
                 TreeEvent::Handled
             }
             TreeAction::ToggleRecursive => {
-                if let Some(selected_idx) = self.list_state.selected()
-                    && let Some(node) = self.visible_nodes.get(selected_idx)
+                if let Some(node) = self.selected_node()
                     && node.has_children
                 {
-                    let parent = node.parent;
-                    let should_expand = !self.expanded.contains(&(parent, node.id));
-                    self.set_expanded_recursive(model, node.id, parent, should_expand);
+                    let should_expand = !self.is_expanded(node.parent, node.id);
+                    self.set_expanded_recursive(model, node.id, node.parent, should_expand);
                     self.dirty = true;
                     return TreeEvent::Handled;
                 }
                 TreeEvent::Unhandled
             }
             TreeAction::ToggleNode => {
-                if let Some(selected_idx) = self.list_state.selected()
-                    && let Some(node) = self.visible_nodes.get(selected_idx)
+                if let Some(node) = self.selected_node()
                     && node.has_children
                 {
                     self.toggle(node.id, node.parent);
@@ -748,7 +779,7 @@ impl<Id: Copy + Eq + Hash> TreeListViewState<Id> {
 
     /// Toggles expansion state for the given node.
     pub fn toggle(&mut self, node_id: Id, parent: Option<Id>) {
-        let key = (parent, node_id);
+        let key = Self::expansion_path(parent, node_id);
         if self.expanded.contains(&key) {
             self.expanded.remove(&key);
         } else {
@@ -759,7 +790,7 @@ impl<Id: Copy + Eq + Hash> TreeListViewState<Id> {
 
     /// Sets expansion state for the given node.
     pub fn set_expanded(&mut self, node_id: Id, parent: Option<Id>, expand: bool) {
-        let key = (parent, node_id);
+        let key = Self::expansion_path(parent, node_id);
         if expand {
             self.expanded.insert(key);
         } else {
@@ -845,7 +876,7 @@ impl<Id: Copy + Eq + Hash> TreeListViewState<Id> {
         });
         self.visible_index.insert(node_id, idx);
 
-        let is_expanded = has_children && self.expanded.contains(&(parent, node_id));
+        let is_expanded = has_children && self.is_expanded(parent, node_id);
         if !is_expanded {
             return;
         }
@@ -895,7 +926,7 @@ impl<Id: Copy + Eq + Hash> TreeListViewState<Id> {
         parent: Option<Id>,
         is_tail_stack: &mut SmallVec<[bool; 8]>,
         filter: &F,
-        config: TreeFilterConfig,
+        auto_expand: bool,
         memo: &mut FxHashMap<Id, bool>,
     ) -> bool
     where
@@ -928,7 +959,7 @@ impl<Id: Copy + Eq + Hash> TreeListViewState<Id> {
         });
         self.visible_index.insert(node_id, idx);
 
-        let expand_children = config.auto_expand || self.expanded.contains(&(parent, node_id));
+        let expand_children = auto_expand || self.is_expanded(parent, node_id);
         if expand_children && !visible_children.is_empty() {
             let last_idx = visible_children.len().saturating_sub(1);
             for (idx, child) in visible_children.iter().copied().enumerate() {
@@ -941,7 +972,7 @@ impl<Id: Copy + Eq + Hash> TreeListViewState<Id> {
                     Some(node_id),
                     is_tail_stack,
                     filter,
-                    config,
+                    auto_expand,
                     memo,
                 );
                 is_tail_stack.pop();
@@ -1031,7 +1062,7 @@ impl<Id: Copy + Eq + Hash> TreeListViewState<Id> {
         let parent_id = selected_node.parent;
 
         if selected_node.has_children {
-            let expand_key = (parent_id, node_id);
+            let expand_key = Self::expansion_path(parent_id, node_id);
             if self.expanded.insert(expand_key) {
                 self.dirty = true;
                 self.update_visible_nodes(model);
@@ -1082,7 +1113,7 @@ impl<Id: Copy + Eq + Hash> TreeListViewState<Id> {
         expand: bool,
     ) {
         let children = model.children(node_id);
-        let key = (parent, node_id);
+        let key = Self::expansion_path(parent, node_id);
         if expand {
             if !children.is_empty() {
                 self.expanded.insert(key);
