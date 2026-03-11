@@ -28,6 +28,7 @@ impl Default for TreeKeyBindings {
 
 impl TreeKeyBindings {
     /// Creates bindings with the default profile.
+    #[must_use]
     pub const fn new() -> Self {
         Self {
             profile: KeymapProfile::Default,
@@ -35,11 +36,13 @@ impl TreeKeyBindings {
     }
 
     /// Creates bindings with a specific profile.
+    #[must_use]
     pub const fn with_profile(profile: KeymapProfile) -> Self {
         Self { profile }
     }
 
     /// Returns the current keymap profile.
+    #[must_use]
     pub const fn profile(&self) -> KeymapProfile {
         self.profile
     }

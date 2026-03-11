@@ -40,45 +40,31 @@ where
 }
 
 /// Configuration for filtered rendering.
-#[derive(Clone, Copy, Debug)]
-pub struct TreeFilterConfig {
-    /// Enables or disables filtering.
-    pub enabled: bool,
-    /// Auto-expands matching paths when filtering.
-    pub auto_expand: bool,
-}
-
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum ParsedFilterConfig {
+pub enum TreeFilterConfig {
+    /// Filtering is disabled.
     Disabled,
+    /// Filtering is enabled.
     Enabled { auto_expand: bool },
 }
 
 impl TreeFilterConfig {
     /// Creates a configuration with filtering disabled.
+    #[must_use]
     pub const fn disabled() -> Self {
-        Self {
-            enabled: false,
-            auto_expand: false,
-        }
+        Self::Disabled
     }
 
     /// Creates a configuration with filtering enabled and auto-expansion.
+    #[must_use]
     pub const fn enabled() -> Self {
-        Self {
-            enabled: true,
-            auto_expand: true,
-        }
+        Self::Enabled { auto_expand: true }
     }
 
-    pub(crate) const fn parsed(self) -> ParsedFilterConfig {
-        if self.enabled {
-            ParsedFilterConfig::Enabled {
-                auto_expand: self.auto_expand,
-            }
-        } else {
-            ParsedFilterConfig::Disabled
-        }
+    /// Creates a configuration with filtering enabled and manual expansion.
+    #[must_use]
+    pub const fn enabled_manual_expand() -> Self {
+        Self::Enabled { auto_expand: false }
     }
 }
 

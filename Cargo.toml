@@ -36,6 +36,11 @@ required-features = ["edit"]
 
 [dev-dependencies]
 chrono = "0.4.44"
+criterion = "0.8.2"
+
+[[bench]]
+name = "perf"
+harness = false
 
 [lints.clippy]
 all = "warn"

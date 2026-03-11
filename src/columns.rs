@@ -34,16 +34,19 @@ pub struct TreeColumnsLayout<const N: usize> {
 
 impl<const N: usize> TreeColumnsLayout<N> {
     /// Creates a new layout with a label constraint and `N` other constraints.
+    #[must_use]
     pub const fn new(label: Constraint, other: [Constraint; N]) -> Self {
         Self { label, other }
     }
 
     /// Returns the label column constraint.
+    #[must_use]
     pub const fn label(&self) -> Constraint {
         self.label
     }
 
     /// Returns the other column constraints.
+    #[must_use]
     pub const fn other(&self) -> &[Constraint] {
         &self.other
     }
@@ -86,6 +89,7 @@ pub struct SimpleColumns<const N: usize, T: TreeModel> {
 
 impl<const N: usize, T: TreeModel> SimpleColumns<N, T> {
     /// Creates a new fixed column layout.
+    #[must_use]
     pub fn new(
         label_constraint: Constraint,
         label_header: &'static str,
@@ -103,12 +107,14 @@ impl<const N: usize, T: TreeModel> SimpleColumns<N, T> {
     }
 
     /// Sets the header row style.
+    #[must_use]
     pub const fn header_style(mut self, style: Style) -> Self {
         self.header_style = style;
         self
     }
 
     /// Disables the header row.
+    #[must_use]
     pub const fn without_header(mut self) -> Self {
         self.show_header = false;
         self
@@ -160,6 +166,7 @@ pub struct ColumnWidth {
 
 impl ColumnWidth {
     /// Creates a fixed width (min = ideal = max).
+    #[must_use]
     pub const fn fixed(width: u16) -> Self {
         Self {
             min: width,
@@ -173,6 +180,7 @@ impl ColumnWidth {
 ///
 /// If `total` is outside the feasible range (`sum(min)`..=`sum(max)`), the returned widths are
 /// clamped to `min` or `max` respectively (so the sum may differ from `total`).
+#[must_use]
 pub fn distribute_widths(total: u16, columns: &[ColumnWidth]) -> SmallVec<[u16; 8]> {
     let mut widths = SmallVec::<[u16; 8]>::with_capacity(columns.len());
     let mut min_sum: u16 = 0;
@@ -223,6 +231,7 @@ pub struct AdaptiveColumns<const N: usize, T: TreeModel> {
 
 impl<const N: usize, T: TreeModel> AdaptiveColumns<N, T> {
     /// Creates a new adaptive column layout.
+    #[must_use]
     pub fn new(
         label_width: ColumnWidth,
         label_header: &'static str,
@@ -243,12 +252,14 @@ impl<const N: usize, T: TreeModel> AdaptiveColumns<N, T> {
     }
 
     /// Sets the header row style.
+    #[must_use]
     pub const fn header_style(mut self, style: Style) -> Self {
         self.header_style = style;
         self
     }
 
     /// Disables the header row.
+    #[must_use]
     pub const fn without_header(mut self) -> Self {
         self.show_header = false;
         self

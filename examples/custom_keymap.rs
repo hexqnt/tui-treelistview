@@ -63,7 +63,7 @@ impl TreeLabelRenderer<Model> for Label {
 }
 
 // Custom keymap: WASD + a few extra actions.
-fn map_key(event: KeyEvent) -> Option<TreeAction> {
+const fn map_key(event: KeyEvent) -> Option<TreeAction> {
     match (event.code, event.modifiers) {
         (KeyCode::Char('w'), KeyModifiers::NONE) => Some(TreeAction::SelectPrev),
         (KeyCode::Char('s'), KeyModifiers::NONE) => Some(TreeAction::SelectNext),

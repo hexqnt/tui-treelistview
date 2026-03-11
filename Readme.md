@@ -29,6 +29,12 @@ Practical usage pattern:
 3) Keep a `TreeListViewState` in your app state, mutate it on input (`handle_action`/`handle_key`), and render `TreeListView` each frame.
 4) (Optional) Enable filtering (`with_filter` + `TreeFilterConfig`), editing actions (`edit` feature), and keymaps (`keymap` feature).
 
+Filtering config is type-driven:
+
+- `TreeFilterConfig::Disabled`
+- `TreeFilterConfig::Enabled { auto_expand: true }`
+- `TreeFilterConfig::Enabled { auto_expand: false }`
+
 ### TreeModel contract
 
 `TreeModel` is intentionally minimal, but it assumes a real tree:

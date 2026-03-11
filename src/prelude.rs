@@ -3,8 +3,8 @@ pub use crate::{
     AdaptiveColumns, ColumnDef, ColumnFn, ColumnWidth, NoFilter, SimpleColumns, TreeAction,
     TreeColumns, TreeColumnsLayout, TreeEvent, TreeFilter, TreeFilterConfig, TreeGlyphs,
     TreeLabelPrefix, TreeLabelProvider, TreeLabelRenderer, TreeListView, TreeListViewSnapshot,
-    TreeListViewState, TreeListViewStyle, TreeModel, TreeRowContext, TreeScrollPolicy,
-    tree_label_line, tree_name_cell,
+    TreeListViewState, TreeListViewStyle, TreeModel, TreeRowContext, TreeRowNodeState,
+    TreeRowRenderState, TreeScrollPolicy, tree_label_line, tree_name_cell,
 };
 
 #[cfg(feature = "keymap")]

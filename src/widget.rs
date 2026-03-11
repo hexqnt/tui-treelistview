@@ -7,9 +7,9 @@ use ratatui::widgets::{
 use smallvec::SmallVec;
 
 use crate::columns::TreeColumns;
-use crate::context::TreeRowContext;
+use crate::context::{TreeRowContext, TreeRowNodeState, TreeRowRenderState};
 use crate::glyphs::{TreeGlyphs, TreeLabelRenderer};
-use crate::model::{NoFilter, ParsedFilterConfig, TreeFilter, TreeFilterConfig, TreeModel};
+use crate::model::{NoFilter, TreeFilter, TreeFilterConfig, TreeModel};
 use crate::state::{TreeListViewState, VisibleNode};
 use crate::style::TreeListViewStyle;
 
@@ -55,6 +55,7 @@ where
     }
 
     /// Sets the glyph set used to render tree guides and expanders.
+    #[must_use]
     pub const fn glyphs(mut self, glyphs: TreeGlyphs<'a>) -> Self {
         self.glyphs = glyphs;
         self
@@ -93,19 +94,25 @@ where
         &self,
         nodes: &[VisibleNode<T::Id>],
         state: &TreeListViewState<T::Id>,
+        tail_stack: &mut SmallVec<[bool; 32]>,
     ) -> Vec<Row<'a>> {
         let mut rows = Vec::with_capacity(nodes.len());
         for node in nodes {
+            Self::update_tail_stack(tail_stack, node);
             let has_children = node.has_children;
             let is_expanded = state.is_expanded(node.parent, node.id);
             let is_marked = state.node_is_marked(node.id);
             let ctx = TreeRowContext {
                 level: node.level,
-                is_tail_stack: node.is_tail_stack.as_slice(),
-                is_expanded,
-                has_children,
-                is_marked,
-                draw_lines: state.draw_lines(),
+                is_tail_stack: tail_stack.as_slice(),
+                node: TreeRowNodeState {
+                    is_expanded,
+                    has_children,
+                    is_marked,
+                },
+                render: TreeRowRenderState {
+                    draw_lines: state.draw_lines(),
+                },
                 line_style: self.style.line_style,
             };
             let label_cell = self.label.cell(self.model, node.id, &ctx, &self.glyphs);
@@ -119,6 +126,16 @@ where
             rows.push(row);
         }
         rows
+    }
+
+    fn update_tail_stack(tail_stack: &mut SmallVec<[bool; 32]>, node: &VisibleNode<T::Id>) {
+        let level = node.level as usize;
+        if level == 0 {
+            tail_stack.clear();
+            return;
+        }
+        tail_stack.truncate(level.saturating_sub(1));
+        tail_stack.push(node.is_last_sibling);
     }
 
     #[inline]
@@ -142,7 +159,6 @@ where
 
     #[inline]
     fn render_scrollbar(
-        &self,
         area: Rect,
         buf: &mut Buffer,
         state: &TreeListViewState<T::Id>,
@@ -174,9 +190,13 @@ where
     type State = TreeListViewState<T::Id>;
 
     fn render(self, area: Rect, buf: &mut Buffer, state: &mut Self::State) {
-        match self.filter_config.parsed() {
-            ParsedFilterConfig::Disabled => state.ensure_visible_nodes(self.model),
-            ParsedFilterConfig::Enabled { .. } => {
+        if area.width == 0 || area.height == 0 {
+            return;
+        }
+
+        match self.filter_config {
+            TreeFilterConfig::Disabled => state.ensure_visible_nodes(self.model),
+            TreeFilterConfig::Enabled { .. } => {
                 state.ensure_visible_nodes_filtered(self.model, &self.filter, self.filter_config);
             }
         }
@@ -207,7 +227,13 @@ where
         };
 
         let nodes = &visible_nodes[range_start..range_end];
-        let rows = self.build_rows(nodes, state);
+        let mut tail_stack = SmallVec::<[bool; 32]>::new();
+        if range_start > 0 {
+            for node in &visible_nodes[..range_start] {
+                Self::update_tail_stack(&mut tail_stack, node);
+            }
+        }
+        let rows = self.build_rows(nodes, state, &mut tail_stack);
 
         let scroll_rows = total_rows.saturating_sub(inner_height);
 
@@ -238,7 +264,7 @@ where
                 ..area
             };
             let scrollbar_area = Rect {
-                x: area.x + area.width - 1,
+                x: area.x.saturating_add(area.width.saturating_sub(1)),
                 y: area.y,
                 width: 1,
                 height: area.height,
@@ -265,7 +291,7 @@ where
         table.render(table_area, buf, table_state);
 
         if let Some(scrollbar_area) = scrollbar_area {
-            self.render_scrollbar(scrollbar_area, buf, state, inner_height, scroll_rows);
+            Self::render_scrollbar(scrollbar_area, buf, state, inner_height, scroll_rows);
         }
     }
 }
@@ -352,6 +378,23 @@ mod tests {
         state.set_expanded(0, None, true);
 
         let area = Rect::new(0, 0, 20, 6);
+        let mut buffer = Buffer::empty(area);
+
+        widget.render(area, &mut buffer, &mut state);
+    }
+
+    #[test]
+    fn render_zero_area_does_not_panic() {
+        let model = TestModel::new(4);
+        let label = Label;
+        let columns = Columns;
+        let style = TreeListViewStyle::default();
+        let widget = TreeListView::new(&model, &label, &columns, style);
+
+        let mut state = TreeListViewState::new();
+        state.set_expanded(0, None, true);
+
+        let area = Rect::new(0, 0, 0, 0);
         let mut buffer = Buffer::empty(area);
 
         widget.render(area, &mut buffer, &mut state);

@@ -5,6 +5,8 @@
 //! - `edit`: `TreeEdit` trait and edit-action helpers.
 //! - `serde`: serde support for `TreeListViewSnapshot`.
 
+#![allow(clippy::multiple_crate_versions)]
+
 mod action;
 mod columns;
 mod context;
@@ -24,7 +26,7 @@ pub use columns::{
     AdaptiveColumns, ColumnDef, ColumnFn, ColumnWidth, SimpleColumns, TreeColumns,
     TreeColumnsLayout, distribute_widths,
 };
-pub use context::TreeRowContext;
+pub use context::{TreeRowContext, TreeRowNodeState, TreeRowRenderState};
 #[cfg(feature = "edit")]
 pub use edit::TreeEdit;
 pub use glyphs::{

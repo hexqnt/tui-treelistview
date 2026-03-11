@@ -32,7 +32,7 @@ struct FsModel {
 }
 
 impl FsModel {
-    fn new() -> Self {
+    const fn new() -> Self {
         Self {
             nodes: Vec::new(),
             root: None,
@@ -163,10 +163,10 @@ impl TreeEdit for FsModel {
             self.root = None;
         }
 
-        if let Some(parent) = self.nodes[id].parent {
-            if let Some(node) = self.nodes.get_mut(parent) {
-                node.children.retain(|&child_id| child_id != id);
-            }
+        if let Some(parent) = self.nodes[id].parent
+            && let Some(node) = self.nodes.get_mut(parent)
+        {
+            node.children.retain(|&child_id| child_id != id);
         }
 
         let children = self.nodes[id].children.clone();
@@ -187,10 +187,10 @@ impl TreeEdit for FsModel {
         if self.is_descendant(child, parent) {
             return;
         }
-        if let Some(old_parent) = self.nodes[child].parent {
-            if let Some(node) = self.nodes.get_mut(old_parent) {
-                node.children.retain(|&id| id != child);
-            }
+        if let Some(old_parent) = self.nodes[child].parent
+            && let Some(node) = self.nodes.get_mut(old_parent)
+        {
+            node.children.retain(|&id| id != child);
         }
         self.nodes[child].parent = Some(parent);
         let children = &mut self.nodes[parent].children;
@@ -211,15 +211,15 @@ impl TreeLabelProvider<FsModel> for Label {
     }
 }
 
-fn size_cell<'a>(model: &'a FsModel, id: usize) -> Cell<'a> {
+fn size_cell(model: &FsModel, id: usize) -> Cell<'_> {
     Cell::from(model.nodes[id].size.as_str())
 }
 
-fn perms_cell<'a>(model: &'a FsModel, id: usize) -> Cell<'a> {
+fn perms_cell(model: &FsModel, id: usize) -> Cell<'_> {
     Cell::from(model.nodes[id].perms.as_str())
 }
 
-fn modified_cell<'a>(model: &'a FsModel, id: usize) -> Cell<'a> {
+fn modified_cell(model: &FsModel, id: usize) -> Cell<'_> {
     Cell::from(model.nodes[id].modified.as_str())
 }
 
@@ -242,7 +242,7 @@ impl DemoArgs {
         let mut path: Option<PathBuf> = None;
         let mut depth: Option<usize> = None;
 
-        let mut args = env::args().skip(1).peekable();
+        let mut args = env::args().skip(1);
         while let Some(arg) = args.next() {
             match arg.as_str() {
                 "-h" | "--help" => {
@@ -307,7 +307,7 @@ fn build_children(
 
     let mut entries: Vec<EntryInfo> = match fs::read_dir(path) {
         Ok(read_dir) => read_dir
-            .filter_map(|entry| entry.ok())
+            .filter_map(std::result::Result::ok)
             .filter_map(|entry| {
                 let path = entry.path();
                 let metadata = fs::symlink_metadata(&path).ok()?;
@@ -362,16 +362,21 @@ fn node_from_meta(name: String, parent: Option<usize>, metadata: &fs::Metadata) 
 
 fn format_size(bytes: u64) -> String {
     const UNITS: [&str; 5] = ["B", "KiB", "MiB", "GiB", "TiB"];
-    let mut value = bytes as f64;
+    let mut value = bytes;
     let mut unit = 0usize;
-    while value >= 1024.0 && unit + 1 < UNITS.len() {
-        value /= 1024.0;
+    while value >= 1024 && unit + 1 < UNITS.len() {
+        value /= 1024;
         unit += 1;
     }
     if unit == 0 {
         format!("{bytes} B")
     } else {
-        format!("{value:.1} {}", UNITS[unit])
+        let mut scale = 1_u64;
+        for _ in 0..unit {
+            scale = scale.saturating_mul(1024);
+        }
+        let value_x10 = bytes.saturating_mul(10) / scale;
+        format!("{}.{} {}", value_x10 / 10, value_x10 % 10, UNITS[unit])
     }
 }
 
@@ -405,13 +410,13 @@ fn format_permissions(metadata: &fs::Metadata) -> String {
 }
 
 fn format_modified(metadata: &fs::Metadata) -> String {
-    match metadata.modified() {
-        Ok(time) => {
+    metadata.modified().map_or_else(
+        |_| "-".to_string(),
+        |time| {
             let datetime: DateTime<Local> = DateTime::from(time);
             datetime.format("%Y-%m-%d %H:%M:%S").to_string()
-        }
-        Err(_) => "-".to_string(),
-    }
+        },
+    )
 }
 
 fn now_string() -> String {
@@ -449,8 +454,8 @@ fn render(
 fn run_app(
     mut terminal: DefaultTerminal,
     mut model: FsModel,
-    columns: SimpleColumns<3, FsModel>,
-    style: TreeListViewStyle<'_>,
+    columns: &SimpleColumns<3, FsModel>,
+    style: &TreeListViewStyle<'_>,
 ) -> io::Result<()> {
     let label = Label;
     let mut state = TreeListViewState::with_capacity(model.size_hint());
@@ -461,7 +466,7 @@ fn run_app(
     }
 
     loop {
-        terminal.draw(|frame| render(frame, &model, &label, &columns, &mut state, &style))?;
+        terminal.draw(|frame| render(frame, &model, &label, columns, &mut state, style))?;
 
         if event::poll(Duration::from_millis(200))? {
             match event::read()? {
@@ -472,11 +477,11 @@ fn run_app(
                         if let TreeEvent::Action(action) = event {
                             match action {
                                 TreeAction::AddChild => {
-                                    if let Some(parent_id) = state.selected_id() {
-                                        if let Some(new_id) = model.add_synthetic_child(parent_id) {
-                                            state.invalidate_all();
-                                            let _ = state.select_by_id(&model, new_id);
-                                        }
+                                    if let Some(parent_id) = state.selected_id()
+                                        && let Some(new_id) = model.add_synthetic_child(parent_id)
+                                    {
+                                        state.invalidate_all();
+                                        let _ = state.select_by_id(&model, new_id);
                                     }
                                 }
                                 TreeAction::EditNode => {
@@ -502,7 +507,6 @@ fn run_app(
                         }
                     }
                 },
-                Event::Resize(_, _) => {}
                 _ => {}
             }
         }
@@ -535,27 +539,29 @@ fn main() -> io::Result<()> {
             .add_modifier(Modifier::BOLD),
     );
 
-    let mut style = TreeListViewStyle::default();
-    style.block_style = Style::default()
-        .fg(Color::Rgb(221, 227, 235))
-        .bg(Color::Rgb(24, 28, 36));
-    style.border_style = Style::default().fg(Color::Rgb(92, 110, 140));
-    style.line_style = Style::default().fg(Color::Rgb(86, 98, 120));
-    style.mark_style = Style::default()
-        .fg(Color::Rgb(136, 192, 208))
-        .add_modifier(Modifier::BOLD);
-    style.highlight_style = Style::default()
-        .fg(Color::Rgb(255, 255, 255))
-        .bg(Color::Rgb(52, 66, 96))
-        .add_modifier(Modifier::BOLD);
-    style.title = Some(Line::from(format!(
-        "{} (depth {})",
-        args.root.display(),
-        args.max_depth
-    )));
+    let style = TreeListViewStyle {
+        title: Some(Line::from(format!(
+            "{} (depth {})",
+            args.root.display(),
+            args.max_depth
+        ))),
+        block_style: Style::default()
+            .fg(Color::Rgb(221, 227, 235))
+            .bg(Color::Rgb(24, 28, 36)),
+        border_style: Style::default().fg(Color::Rgb(92, 110, 140)),
+        highlight_style: Style::default()
+            .fg(Color::Rgb(255, 255, 255))
+            .bg(Color::Rgb(52, 66, 96))
+            .add_modifier(Modifier::BOLD),
+        mark_style: Style::default()
+            .fg(Color::Rgb(136, 192, 208))
+            .add_modifier(Modifier::BOLD),
+        line_style: Style::default().fg(Color::Rgb(86, 98, 120)),
+        ..TreeListViewStyle::default()
+    };
 
     let terminal = ratatui::init();
-    let result = run_app(terminal, model, columns, style);
+    let result = run_app(terminal, model, &columns, &style);
     ratatui::restore();
     result
 }

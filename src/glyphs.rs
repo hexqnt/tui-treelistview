@@ -2,6 +2,7 @@ use std::borrow::Cow;
 
 use ratatui::text::{Line, Span};
 use ratatui::widgets::Cell;
+use smallvec::SmallVec;
 
 use crate::context::TreeRowContext;
 use crate::model::TreeModel;
@@ -29,6 +30,7 @@ pub struct TreeGlyphs<'a> {
 
 impl TreeGlyphs<'static> {
     /// Returns a Unicode glyph set.
+    #[must_use]
     pub const fn unicode() -> Self {
         Self {
             indent: "   ",
@@ -43,6 +45,7 @@ impl TreeGlyphs<'static> {
     }
 
     /// Returns an ASCII-only glyph set.
+    #[must_use]
     pub const fn ascii() -> Self {
         Self {
             indent: "   ",
@@ -102,6 +105,7 @@ where
 }
 
 /// Builds a `Line` for the tree label, including guides and expanders.
+#[must_use]
 pub fn tree_label_line<'a>(
     ctx: &TreeRowContext<'_>,
     parts: TreeLabelPrefix<'a>,
@@ -110,9 +114,9 @@ pub fn tree_label_line<'a>(
     let TreeLabelPrefix { name, prefix: op } = parts;
     let op = op.filter(|value| !value.is_empty());
 
-    if ctx.level == 0 || !ctx.draw_lines {
-        let expander = if ctx.has_children {
-            if ctx.is_expanded {
+    if ctx.level == 0 || !ctx.render.draw_lines {
+        let expander = if ctx.node.has_children {
+            if ctx.node.is_expanded {
                 glyphs.expanded
             } else {
                 glyphs.collapsed
@@ -123,7 +127,7 @@ pub fn tree_label_line<'a>(
             glyphs.leaf
         };
 
-        let mut spans = Vec::with_capacity(ctx.level as usize + 6);
+        let mut spans = SmallVec::<[Span; 16]>::with_capacity(ctx.level as usize + 6);
         if ctx.level > 0 {
             for _ in 0..ctx.level {
                 spans.push(Span::raw(glyphs.empty));
@@ -137,10 +141,10 @@ pub fn tree_label_line<'a>(
         }
         spans.push(Span::raw(" "));
         spans.push(Span::raw(name));
-        return Line::from(spans);
+        return Line::from(spans.into_vec());
     }
 
-    let mut name_spans = Vec::with_capacity(ctx.is_tail_stack.len() + 6);
+    let mut name_spans = SmallVec::<[Span; 16]>::with_capacity(ctx.is_tail_stack.len() + 6);
 
     for (l, is_last) in ctx.is_tail_stack.iter().enumerate() {
         let part = if l == (ctx.level as usize) - 1 {
@@ -157,8 +161,8 @@ pub fn tree_label_line<'a>(
         name_spans.push(Span::styled(part, ctx.line_style));
     }
 
-    let expander = if ctx.has_children {
-        if ctx.is_expanded {
+    let expander = if ctx.node.has_children {
+        if ctx.node.is_expanded {
             glyphs.expanded
         } else {
             glyphs.collapsed
@@ -178,15 +182,77 @@ pub fn tree_label_line<'a>(
     }
 
     name_spans.push(Span::raw(name));
-    Line::from(name_spans)
+    Line::from(name_spans.into_vec())
 }
 
 /// Convenience wrapper to build a label `Cell` from the label `Line`.
 #[inline]
+#[must_use]
 pub fn tree_name_cell<'a>(
     ctx: &TreeRowContext<'_>,
     parts: TreeLabelPrefix<'a>,
     glyphs: &TreeGlyphs<'a>,
 ) -> Cell<'a> {
     Cell::from(tree_label_line(ctx, parts, glyphs))
+}
+
+#[cfg(test)]
+mod tests {
+    use ratatui::style::Style;
+
+    use super::{TreeGlyphs, TreeLabelPrefix, tree_label_line};
+    use crate::context::{TreeRowContext, TreeRowNodeState, TreeRowRenderState};
+
+    #[test]
+    fn tree_label_line_renders_root_expander() {
+        let ctx = TreeRowContext {
+            level: 0,
+            is_tail_stack: &[],
+            node: TreeRowNodeState {
+                is_expanded: false,
+                has_children: true,
+                is_marked: false,
+            },
+            render: TreeRowRenderState { draw_lines: true },
+            line_style: Style::default(),
+        };
+
+        let line = tree_label_line(
+            &ctx,
+            TreeLabelPrefix {
+                name: "root",
+                prefix: None,
+            },
+            &TreeGlyphs::unicode(),
+        );
+
+        assert_eq!(line.to_string(), "▶ root");
+    }
+
+    #[test]
+    fn tree_label_line_renders_nested_leaf_with_guides() {
+        let tail_stack = [false, true];
+        let ctx = TreeRowContext {
+            level: 2,
+            is_tail_stack: &tail_stack,
+            node: TreeRowNodeState {
+                is_expanded: false,
+                has_children: false,
+                is_marked: false,
+            },
+            render: TreeRowRenderState { draw_lines: true },
+            line_style: Style::default(),
+        };
+
+        let line = tree_label_line(
+            &ctx,
+            TreeLabelPrefix {
+                name: "leaf",
+                prefix: None,
+            },
+            &TreeGlyphs::unicode(),
+        );
+
+        assert_eq!(line.to_string(), "│  └──• leaf");
+    }
 }
