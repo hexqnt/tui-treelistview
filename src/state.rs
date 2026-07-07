@@ -57,6 +57,9 @@ struct SelectedNode<Id> {
 }
 
 /// Widget state: expanded nodes, selection, and visibility/mark caches.
+///
+/// Call [`TreeListViewState::invalidate`] after external model or filter changes that affect
+/// visibility. Use [`TreeListViewState::invalidate_all`] when marks may also be affected.
 pub struct TreeListViewState<Id> {
     list_state: TableState,
     // Track expansion by (parent, id) to keep it tied to a specific path (e.g., after moves).
@@ -241,6 +244,8 @@ mod tests {
         children: Vec<Vec<usize>>,
     }
 
+    struct EmptyTree;
+
     impl TestTree {
         fn new() -> Self {
             Self {
@@ -252,6 +257,22 @@ mod tests {
                     vec![],     // 4
                 ],
             }
+        }
+    }
+
+    impl TreeModel for EmptyTree {
+        type Id = usize;
+
+        fn root(&self) -> Option<Self::Id> {
+            None
+        }
+
+        fn children(&self, _id: Self::Id) -> &[Self::Id] {
+            &[]
+        }
+
+        fn contains(&self, _id: Self::Id) -> bool {
+            false
         }
     }
 
@@ -391,5 +412,24 @@ mod tests {
         let ids: Vec<_> = state.visible_nodes().iter().map(|node| node.id).collect();
         assert_eq!(ids, vec![0, 1]);
         assert_eq!(state.selected_id(), Some(1));
+    }
+
+    #[test]
+    fn global_actions_work_without_visible_nodes() {
+        let tree = EmptyTree;
+        let mut state = TreeListViewState::<usize>::new();
+
+        let event = state.handle_action(&tree, TreeAction::<()>::ToggleGuides);
+        assert!(matches!(event, TreeEvent::Handled));
+        assert!(!state.draw_lines());
+
+        let event = state.handle_action(&tree, TreeAction::<()>::ExpandAll);
+        assert!(matches!(event, TreeEvent::Handled));
+
+        let event = state.handle_action(&tree, TreeAction::<()>::CollapseAll);
+        assert!(matches!(event, TreeEvent::Handled));
+
+        let event = state.handle_action(&tree, TreeAction::<()>::SelectFirst);
+        assert!(matches!(event, TreeEvent::Unhandled));
     }
 }

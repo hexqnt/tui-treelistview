@@ -163,15 +163,13 @@ where
         buf: &mut Buffer,
         state: &TreeListViewState<T::Id>,
         inner_height: usize,
-        scroll_rows: usize,
+        total_rows: usize,
     ) {
-        // Add 1 so the scrollbar is never zero-length.
-        let scroll_len = scroll_rows.saturating_add(1);
         let position = state
             .list_state()
             .offset()
-            .min(scroll_len.saturating_sub(1));
-        let mut scrollbar_state = ScrollbarState::new(scroll_len)
+            .min(total_rows.saturating_sub(1));
+        let mut scrollbar_state = ScrollbarState::new(total_rows)
             .position(position)
             .viewport_content_length(inner_height);
         Scrollbar::default()
@@ -290,7 +288,7 @@ where
         table.render(table_area, buf, table_state);
 
         if let Some(scrollbar_area) = scrollbar_area {
-            Self::render_scrollbar(scrollbar_area, buf, state, inner_height, scroll_rows);
+            Self::render_scrollbar(scrollbar_area, buf, state, inner_height, total_rows);
         }
     }
 }

@@ -44,6 +44,10 @@ Filtering config is type-driven:
 - `Id` is stable across frames so expansion/selection works.
 - `children(id)` returns a deterministic slice for the lifetime of the model reference.
 - `contains(id)` matches your model storage (used for pruning marks).
+- Very deep trees can exhaust the call stack because some traversals are recursive.
+
+If your model or filter changes outside tree-list actions, call `TreeListViewState::invalidate()`
+before rendering or handling input. Use `invalidate_all()` when mark state may also be affected.
 
 ## Usage
 
@@ -87,7 +91,7 @@ Interactive demo (path + depth):
 cargo run --example demo --features keymap,edit -- ./ 3
 ```
 
-Keys: arrows/hjkl navigate, Enter toggle, E expand all, C collapse all, Shift+Up/Down reorder, Del/d detach, Shift+Del or S delete, y/p move, a add, e rename, q/Esc quit.
+Keys: arrows/hjkl navigate, Enter toggle, E expand all, C collapse all, Shift+Up/Down reorder, Del/d detach, Shift+Del or D delete, y/p move, a add, e rename, q/Esc quit.
 
 ## Path to Release
 

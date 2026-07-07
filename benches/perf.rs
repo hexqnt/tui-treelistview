@@ -1,4 +1,6 @@
-use criterion::{BenchmarkId, Criterion, black_box, criterion_group, criterion_main};
+use std::hint::black_box;
+
+use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};
 use ratatui::layout::{Constraint, Rect};
 use ratatui::prelude::Buffer;
 use ratatui::widgets::{Cell, StatefulWidget};

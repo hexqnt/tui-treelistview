@@ -6,6 +6,8 @@ use std::hash::Hash;
 /// - no cycles (DFS traversal is used directly);
 /// - each node has exactly one parent;
 /// - identifiers are stable between frames (for selection/expansion).
+///
+/// Some internal traversals are recursive, so extremely deep trees can exhaust the call stack.
 pub trait TreeModel {
     /// Node identifier type.
     type Id: Copy + Eq + Hash;

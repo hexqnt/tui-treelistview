@@ -225,24 +225,44 @@ impl<Id: Copy + Eq + Hash> TreeListViewState<Id> {
             return TreeEvent::Action(action);
         }
 
-        if self.visible_nodes.is_empty() {
-            return TreeEvent::Unhandled;
-        }
-
         match action {
+            TreeAction::ExpandAll => {
+                self.expand_all(model);
+                TreeEvent::Handled
+            }
+            TreeAction::CollapseAll => {
+                self.collapse_all();
+                TreeEvent::Handled
+            }
+            TreeAction::ToggleGuides => {
+                self.draw_lines = !self.draw_lines;
+                TreeEvent::Handled
+            }
             TreeAction::SelectPrev => {
+                if self.visible_nodes.is_empty() {
+                    return TreeEvent::Unhandled;
+                }
                 self.select_prev();
                 TreeEvent::Handled
             }
             TreeAction::SelectNext => {
+                if self.visible_nodes.is_empty() {
+                    return TreeEvent::Unhandled;
+                }
                 self.select_next();
                 TreeEvent::Handled
             }
             TreeAction::SelectParent => {
+                if self.visible_nodes.is_empty() {
+                    return TreeEvent::Unhandled;
+                }
                 self.select_parent();
                 TreeEvent::Handled
             }
             TreeAction::SelectChild => {
+                if self.visible_nodes.is_empty() {
+                    return TreeEvent::Unhandled;
+                }
                 self.select_child_with_descendants(model, rebuild_visible);
                 TreeEvent::Handled
             }
@@ -266,18 +286,6 @@ impl<Id: Copy + Eq + Hash> TreeListViewState<Id> {
                 }
                 TreeEvent::Unhandled
             }
-            TreeAction::ExpandAll => {
-                self.expand_all(model);
-                TreeEvent::Handled
-            }
-            TreeAction::CollapseAll => {
-                self.collapse_all();
-                TreeEvent::Handled
-            }
-            TreeAction::ToggleGuides => {
-                self.draw_lines = !self.draw_lines;
-                TreeEvent::Handled
-            }
             TreeAction::ToggleMark => {
                 if let Some(node_id) = self.selected_id() {
                     self.toggle_node_mark(node_id);
@@ -286,10 +294,16 @@ impl<Id: Copy + Eq + Hash> TreeListViewState<Id> {
                 TreeEvent::Unhandled
             }
             TreeAction::SelectFirst => {
+                if self.visible_nodes.is_empty() {
+                    return TreeEvent::Unhandled;
+                }
                 self.select_first();
                 TreeEvent::Handled
             }
             TreeAction::SelectLast => {
+                if self.visible_nodes.is_empty() {
+                    return TreeEvent::Unhandled;
+                }
                 self.select_last();
                 TreeEvent::Handled
             }
