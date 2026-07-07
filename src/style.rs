@@ -12,7 +12,7 @@ pub enum TreeScrollPolicy {
 }
 
 /// Visual settings for the tree list view widget.
-#[derive(Clone)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct TreeListViewStyle<'a> {
     /// Optional title displayed in the surrounding block.
     pub title: Option<Line<'a>>,
@@ -49,6 +49,26 @@ impl Default for TreeListViewStyle<'_> {
             borders: Borders::ALL,
             virtualize_rows: false,
             scroll_policy: TreeScrollPolicy::KeepInView,
+        }
+    }
+}
+
+impl TreeListViewStyle<'_> {
+    /// Creates default style without borders.
+    #[must_use]
+    pub fn borderless() -> Self {
+        Self {
+            borders: Borders::NONE,
+            ..Self::default()
+        }
+    }
+
+    /// Creates default style with row virtualization enabled.
+    #[must_use]
+    pub fn virtualized() -> Self {
+        Self {
+            virtualize_rows: true,
+            ..Self::default()
         }
     }
 }

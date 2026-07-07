@@ -37,6 +37,7 @@ where
     C: TreeColumns<T>,
 {
     /// Creates a new tree list view with the default glyph set and no filter.
+    #[must_use]
     pub const fn new(
         model: &'a T,
         label: &'a L,
@@ -62,6 +63,7 @@ where
     }
 
     /// Enables filtering with the provided filter and configuration.
+    #[must_use]
     pub fn with_filter<F>(
         self,
         filter: F,

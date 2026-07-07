@@ -56,10 +56,58 @@ impl<Id: Copy + Eq + Hash> TreeListViewState<Id> {
     }
 
     /// Returns `true` if the node is effectively marked.
+    ///
+    /// Uses the current mark cache.
     #[inline]
     #[must_use]
     pub fn node_is_marked(&self, node_id: Id) -> bool {
         self.effective_marked.contains(&node_id)
+    }
+
+    /// Returns `true` if the node is explicitly marked by the user/application.
+    #[inline]
+    #[must_use]
+    pub fn node_is_manually_marked(&self, node_id: Id) -> bool {
+        self.manual_marked.contains(&node_id)
+    }
+
+    /// Returns `true` if the node is explicitly marked by the user/application.
+    #[inline]
+    #[must_use]
+    pub fn is_manually_marked(&self, node_id: Id) -> bool {
+        self.node_is_manually_marked(node_id)
+    }
+
+    /// Sets the explicit mark state for a node.
+    pub fn set_marked(&mut self, node_id: Id, marked: bool) {
+        let changed = if marked {
+            self.manual_marked.insert(node_id)
+        } else {
+            self.manual_marked.remove(&node_id)
+        };
+        if changed {
+            self.marks_dirty = true;
+        }
+    }
+
+    /// Toggles the explicit mark state for a node.
+    pub fn toggle_marked(&mut self, node_id: Id) {
+        self.toggle_node_mark(node_id);
+    }
+
+    /// Clears all explicit marks.
+    pub fn clear_marks(&mut self) {
+        if self.manual_marked.is_empty() && self.effective_marked.is_empty() {
+            return;
+        }
+        self.manual_marked.clear();
+        self.effective_marked.clear();
+        self.marks_dirty = true;
+    }
+
+    /// Returns explicitly marked node ids in unspecified order.
+    pub fn manual_marked_ids(&self) -> impl Iterator<Item = Id> + '_ {
+        self.manual_marked.iter().copied()
     }
 
     /// Removes marks that refer to nodes no longer in the model.

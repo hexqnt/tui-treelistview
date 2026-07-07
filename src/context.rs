@@ -1,7 +1,7 @@
 use ratatui::style::Style;
 
 /// Node-specific flags used while rendering a row.
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct TreeRowNodeState {
     /// Whether the node is currently expanded.
     pub is_expanded: bool,
@@ -12,14 +12,14 @@ pub struct TreeRowNodeState {
 }
 
 /// Rendering flags that affect visual presentation.
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct TreeRowRenderState {
     /// Whether guide lines should be rendered.
     pub draw_lines: bool,
 }
 
 /// Rendering context for a single tree row.
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct TreeRowContext<'a> {
     /// Depth level of the node in the tree (root = 0).
     pub level: u16,

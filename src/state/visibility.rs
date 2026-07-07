@@ -86,6 +86,11 @@ impl<Id: Copy + Eq + Hash> TreeListViewState<Id> {
         self.dirty = true;
     }
 
+    /// Clears all expansion state.
+    pub fn clear_expanded(&mut self) {
+        self.collapse_all();
+    }
+
     /// Ensures the visible node list is up to date (if marked dirty).
     pub fn ensure_visible_nodes<T: TreeModel<Id = Id>>(&mut self, model: &T) {
         if !self.dirty {
@@ -160,6 +165,17 @@ impl<Id: Copy + Eq + Hash> TreeListViewState<Id> {
             self.expanded.remove(&key);
         }
         self.dirty = true;
+    }
+
+    /// Returns whether the given node path is expanded.
+    #[must_use]
+    pub fn node_is_expanded(&self, node_id: Id, parent: Option<Id>) -> bool {
+        self.is_expanded(parent, node_id)
+    }
+
+    /// Returns expanded `(parent, id)` paths in unspecified order.
+    pub fn expanded_paths(&self) -> impl Iterator<Item = (Option<Id>, Id)> + '_ {
+        self.expanded.iter().copied().map(Into::into)
     }
 
     fn reserve_visible_capacity<T: TreeModel<Id = Id>>(&mut self, model: &T) {

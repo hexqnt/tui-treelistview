@@ -15,7 +15,7 @@ mod navigation;
 mod visibility;
 
 /// A visible node row with metadata used for rendering and navigation.
-#[derive(Clone)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct VisibleNode<Id> {
     pub(crate) id: Id,
     pub(crate) level: u16,
@@ -48,7 +48,7 @@ impl<Id> From<ExpansionPath<Id>> for (Option<Id>, Id) {
     }
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct SelectedNode<Id> {
     id: Id,
     parent: Option<Id>,
@@ -86,7 +86,7 @@ pub struct TreeListViewState<Id> {
 ///
 /// With the `serde` feature enabled, this type derives `Serialize`/`Deserialize`.
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct TreeListViewSnapshot<Id> {
     /// Expanded nodes as `(parent, id)` pairs.
     pub expanded: Vec<(Option<Id>, Id)>,
@@ -113,6 +113,14 @@ impl<Id: Copy + Eq + Hash> TreeListViewState<Id> {
     #[must_use]
     pub fn new() -> Self {
         Self::with_capacity(0)
+    }
+
+    /// Creates a state from a previously captured snapshot.
+    #[must_use]
+    pub fn from_snapshot(snapshot: TreeListViewSnapshot<Id>) -> Self {
+        let mut state = Self::new();
+        state.restore(snapshot);
+        state
     }
 
     /// Creates a state with preallocated capacity for the given number of nodes.
@@ -152,10 +160,6 @@ impl<Id: Copy + Eq + Hash> TreeListViewState<Id> {
 
     pub(crate) fn visible_nodes(&self) -> &[VisibleNode<Id>] {
         &self.visible_nodes
-    }
-
-    fn visible_index_of(&self, id: Id) -> Option<usize> {
-        self.visible_index.get(&id).copied()
     }
 
     const fn expansion_path(parent: Option<Id>, id: Id) -> ExpansionPath<Id> {
@@ -202,9 +206,9 @@ impl<Id: Copy + Eq + Hash> TreeListViewState<Id> {
         self.expanded = snapshot.expanded.into_iter().map(Into::into).collect();
         self.manual_marked = snapshot.manual_marked.into_iter().collect();
         self.draw_lines = snapshot.draw_lines;
-        *self.list_state.offset_mut() = snapshot.offset;
+        self.set_offset(snapshot.offset);
         self.list_state.select(snapshot.selected);
-        *self.list_state.selected_column_mut() = snapshot.selected_column;
+        self.select_column(snapshot.selected_column);
         self.dirty = true;
         self.marks_dirty = true;
     }
@@ -292,6 +296,10 @@ mod tests {
         }
     }
 
+    fn visible_ids(state: &TreeListViewState<usize>) -> Vec<usize> {
+        state.visible_ids().collect()
+    }
+
     #[test]
     fn builds_visible_nodes_with_expansion() {
         let tree = TestTree::new();
@@ -301,10 +309,9 @@ mod tests {
         state.set_expanded(1, Some(0), true);
         state.ensure_visible_nodes(&tree);
 
-        let ids: Vec<_> = state.visible_nodes().iter().map(|n| n.id).collect();
         let levels: Vec<_> = state.visible_nodes().iter().map(|n| n.level).collect();
 
-        assert_eq!(ids, vec![0, 1, 3, 4, 2]);
+        assert_eq!(visible_ids(&state), vec![0, 1, 3, 4, 2]);
         assert_eq!(levels, vec![0, 1, 2, 2, 1]);
     }
 
@@ -316,8 +323,7 @@ mod tests {
 
         state.ensure_visible_nodes_filtered(&tree, &filter, TreeFilterConfig::enabled());
 
-        let ids: Vec<_> = state.visible_nodes().iter().map(|n| n.id).collect();
-        assert_eq!(ids, vec![0, 1, 4]);
+        assert_eq!(visible_ids(&state), vec![0, 1, 4]);
     }
 
     #[test]
@@ -352,15 +358,13 @@ mod tests {
         assert!(matches!(event, TreeEvent::Handled));
         state.ensure_visible_nodes(&tree);
 
-        let ids: Vec<_> = state.visible_nodes().iter().map(|n| n.id).collect();
-        assert_eq!(ids, vec![0, 1, 3, 4, 2]);
+        assert_eq!(visible_ids(&state), vec![0, 1, 3, 4, 2]);
 
         let event = state.handle_action(&tree, TreeAction::<()>::CollapseAll);
         assert!(matches!(event, TreeEvent::Handled));
         state.ensure_visible_nodes(&tree);
 
-        let ids: Vec<_> = state.visible_nodes().iter().map(|n| n.id).collect();
-        assert_eq!(ids, vec![0]);
+        assert_eq!(visible_ids(&state), vec![0]);
     }
 
     #[test]
@@ -409,8 +413,7 @@ mod tests {
             state.handle_action_filtered(&tree, &filter, config, TreeAction::<()>::SelectChild);
         assert!(matches!(event, TreeEvent::Handled));
 
-        let ids: Vec<_> = state.visible_nodes().iter().map(|node| node.id).collect();
-        assert_eq!(ids, vec![0, 1]);
+        assert_eq!(visible_ids(&state), vec![0, 1]);
         assert_eq!(state.selected_id(), Some(1));
     }
 
@@ -431,5 +434,76 @@ mod tests {
 
         let event = state.handle_action(&tree, TreeAction::<()>::SelectFirst);
         assert!(matches!(event, TreeEvent::Unhandled));
+    }
+
+    #[test]
+    fn public_state_helpers_expose_cached_state() {
+        let tree = TestTree::new();
+        let mut state = TreeListViewState::<usize>::new();
+
+        state.set_expanded(0, None, true);
+        state.ensure_visible_nodes(&tree);
+        state.select_next();
+        state.ensure_selection_visible(1);
+        state.set_marked(1, true);
+        state.ensure_mark_cache(&tree);
+
+        assert_eq!(state.selected_index(), Some(1));
+        assert_eq!(state.selected_id(), Some(1));
+        assert_eq!(state.offset(), 1);
+        assert_eq!(state.selected_column(), None);
+        assert_eq!(state.visible_len(), 3);
+        assert!(!state.is_empty());
+        assert_eq!(visible_ids(&state), vec![0, 1, 2]);
+        assert_eq!(state.visible_index_of(2), Some(2));
+        assert!(state.visible_contains(1));
+        assert!(!state.visible_contains(4));
+        assert!(state.node_is_expanded(0, None));
+        assert!(state.expanded_paths().any(|path| path == (None, 0)));
+        assert!(state.node_is_manually_marked(1));
+        assert!(state.is_manually_marked(1));
+        assert!(state.manual_marked_ids().any(|id| id == 1));
+        assert!(state.node_is_marked(1));
+
+        state.toggle_marked(1);
+        state.ensure_mark_cache(&tree);
+        assert!(!state.node_is_manually_marked(1));
+        assert!(!state.node_is_marked(1));
+
+        state.set_marked(2, true);
+        state.clear_marks();
+        state.ensure_mark_cache(&tree);
+        assert_eq!(state.manual_marked_ids().count(), 0);
+        assert!(!state.node_is_marked(2));
+
+        let snapshot = state.snapshot();
+        let restored = TreeListViewState::from_snapshot(snapshot);
+        assert_eq!(restored.selected_index(), state.selected_index());
+        assert_eq!(restored.offset(), state.offset());
+    }
+
+    #[test]
+    fn direct_selection_setters_update_table_state() {
+        let tree = TestTree::new();
+        let mut state = TreeListViewState::<usize>::new();
+        state.set_expanded(0, None, true);
+        state.ensure_visible_nodes(&tree);
+
+        state.select_index(Some(usize::MAX));
+        assert_eq!(state.selected_index(), Some(2));
+        assert_eq!(state.selected_id(), Some(2));
+
+        state.select_index(None);
+        assert_eq!(state.selected_index(), None);
+
+        state.set_offset(2);
+        state.select_column(Some(3));
+        assert_eq!(state.offset(), 2);
+        assert_eq!(state.selected_column(), Some(3));
+
+        let mut empty_state = TreeListViewState::<usize>::new();
+        empty_state.ensure_visible_nodes(&EmptyTree);
+        empty_state.select_index(Some(0));
+        assert_eq!(empty_state.selected_index(), None);
     }
 }

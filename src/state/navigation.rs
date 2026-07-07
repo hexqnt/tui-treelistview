@@ -26,6 +26,51 @@ impl<Id: Copy + Eq + Hash> TreeListViewState<Id> {
         self.list_state.scroll_up_by(amount);
     }
 
+    /// Returns the selected visible row index, if any.
+    ///
+    /// Uses the current visible-node cache.
+    #[must_use]
+    pub const fn selected_index(&self) -> Option<usize> {
+        self.list_state.selected()
+    }
+
+    /// Returns the current scroll offset within the visible list.
+    ///
+    /// Uses the current visible-node cache.
+    #[must_use]
+    pub const fn offset(&self) -> usize {
+        self.list_state.offset()
+    }
+
+    /// Returns the selected table column index, if any.
+    #[must_use]
+    pub const fn selected_column(&self) -> Option<usize> {
+        self.list_state.selected_column()
+    }
+
+    /// Sets the selected visible row index.
+    ///
+    /// Out-of-range indices are clamped to the last visible row. Selecting any row in an empty
+    /// visible list clears selection.
+    pub const fn select_index(&mut self, selected: Option<usize>) {
+        self.list_state.select(selected);
+        self.clamp_selection();
+    }
+
+    /// Sets the current scroll offset within the visible list.
+    ///
+    /// The value is stored as provided; rendering clamps it to the visible range when needed.
+    pub const fn set_offset(&mut self, offset: usize) {
+        *self.list_state.offset_mut() = offset;
+    }
+
+    /// Sets the selected table column index.
+    ///
+    /// The widget does not clamp this value because column count is provided by `TreeColumns`.
+    pub const fn select_column(&mut self, selected_column: Option<usize>) {
+        *self.list_state.selected_column_mut() = selected_column;
+    }
+
     /// Moves selection to the previous visible row.
     pub fn select_prev(&mut self) {
         if self.visible_nodes.is_empty() {
@@ -99,30 +144,71 @@ impl<Id: Copy + Eq + Hash> TreeListViewState<Id> {
     }
 
     /// Returns the id of the currently selected node, if any.
+    ///
+    /// Uses the current visible-node cache.
     #[must_use]
     pub fn selected_id(&self) -> Option<Id> {
         self.selected_node().map(|node| node.id)
     }
 
     /// Returns the parent id of the currently selected node, if any.
+    ///
+    /// Uses the current visible-node cache.
     #[must_use]
     pub fn selected_parent_id(&self) -> Option<Id> {
         self.selected_node().and_then(|node| node.parent)
     }
 
     /// Returns the number of visible nodes in the current view.
+    ///
+    /// Uses the current visible-node cache.
     #[must_use]
     pub const fn visible_len(&self) -> usize {
         self.visible_nodes.len()
     }
 
+    /// Returns whether the current visible list is empty.
+    ///
+    /// Uses the current visible-node cache.
+    #[must_use]
+    pub const fn is_empty(&self) -> bool {
+        self.visible_nodes.is_empty()
+    }
+
+    /// Returns visible node ids in their current row order.
+    ///
+    /// Uses the current visible-node cache.
+    pub fn visible_ids(&self) -> impl Iterator<Item = Id> + '_ {
+        self.visible_nodes.iter().map(|node| node.id)
+    }
+
+    /// Returns the visible row index for a node id, if the node is currently visible.
+    ///
+    /// Uses the current visible-node cache.
+    #[must_use]
+    pub fn visible_index_of(&self, id: Id) -> Option<usize> {
+        self.visible_index.get(&id).copied()
+    }
+
+    /// Returns whether a node id is currently visible.
+    ///
+    /// Uses the current visible-node cache.
+    #[must_use]
+    pub fn visible_contains(&self, id: Id) -> bool {
+        self.visible_index.contains_key(&id)
+    }
+
     /// Returns the depth level of the currently selected node.
+    ///
+    /// Uses the current visible-node cache.
     #[must_use]
     pub fn selected_level(&self) -> Option<u16> {
         self.selected_node().map(|node| node.level)
     }
 
     /// Returns whether the selected node is expanded (or `None` if nothing is selected).
+    ///
+    /// Uses the current visible-node cache.
     #[must_use]
     pub fn selected_is_expanded<T: TreeModel<Id = Id>>(&self, _model: &T) -> Option<bool> {
         let node = self.selected_node()?;

@@ -8,7 +8,7 @@ use crate::context::TreeRowContext;
 use crate::model::TreeModel;
 
 /// Glyph set used to render the tree structure and expanders.
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct TreeGlyphs<'a> {
     /// Indentation for empty levels.
     pub indent: &'a str,
@@ -61,7 +61,7 @@ impl TreeGlyphs<'static> {
 }
 
 /// Label parts: name with an optional prefix (e.g., marker or icon).
-#[derive(Clone)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct TreeLabelPrefix<'a> {
     /// Node display name.
     pub name: &'a str,

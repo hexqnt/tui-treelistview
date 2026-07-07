@@ -68,6 +68,12 @@ impl TreeFilterConfig {
     pub const fn enabled_manual_expand() -> Self {
         Self::Enabled { auto_expand: false }
     }
+
+    /// Creates a configuration with filtering enabled and explicit auto-expansion behavior.
+    #[must_use]
+    pub const fn enabled_auto_expand(auto_expand: bool) -> Self {
+        Self::Enabled { auto_expand }
+    }
 }
 
 impl Default for TreeFilterConfig {
@@ -77,7 +83,7 @@ impl Default for TreeFilterConfig {
 }
 
 /// Filter that matches every node.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct NoFilter;
 
 impl<T: TreeModel> TreeFilter<T> for NoFilter {

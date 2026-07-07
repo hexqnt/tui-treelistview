@@ -27,6 +27,7 @@ pub trait TreeColumns<T: TreeModel> {
 }
 
 /// Simple container for a label constraint and a fixed set of other constraints.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct TreeColumnsLayout<const N: usize> {
     label: Constraint,
     other: [Constraint; N],
@@ -56,7 +57,7 @@ impl<const N: usize> TreeColumnsLayout<N> {
 pub type ColumnFn<T> = for<'a> fn(&'a T, <T as TreeModel>::Id) -> Cell<'a>;
 
 /// Column definition: header label, width constraint, and cell renderer.
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 pub struct ColumnDef<T: TreeModel> {
     /// Header label for the column.
     pub header: &'static str,
@@ -68,6 +69,7 @@ pub struct ColumnDef<T: TreeModel> {
 
 impl<T: TreeModel> ColumnDef<T> {
     /// Creates a new column definition.
+    #[must_use]
     pub const fn new(header: &'static str, constraint: Constraint, cell: ColumnFn<T>) -> Self {
         Self {
             header,
@@ -154,7 +156,7 @@ impl<const N: usize, T: TreeModel> TreeColumns<T> for SimpleColumns<N, T> {
 }
 
 /// Width constraints for a column in adaptive layout.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ColumnWidth {
     /// Minimum width.
     pub min: u16,

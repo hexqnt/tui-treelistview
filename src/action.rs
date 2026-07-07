@@ -46,7 +46,7 @@ pub enum TreeAction<Custom = ()> {
 }
 
 /// Result of handling an action or key event.
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum TreeEvent<Custom = ()> {
     /// The action was handled internally and state was updated.
     Handled,
