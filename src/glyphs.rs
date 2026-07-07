@@ -146,14 +146,15 @@ pub fn tree_label_line<'a>(
 
     let mut name_spans = SmallVec::<[Span; 16]>::with_capacity(ctx.is_tail_stack.len() + 6);
 
-    for (l, is_last) in ctx.is_tail_stack.iter().enumerate() {
-        let part = if l == (ctx.level as usize) - 1 {
-            if *is_last {
+    let branch_level = (ctx.level as usize) - 1;
+    for (level, &is_last) in ctx.is_tail_stack.iter().enumerate() {
+        let part = if level == branch_level {
+            if is_last {
                 glyphs.branch_last
             } else {
                 glyphs.branch
             }
-        } else if ctx.is_tail_stack[l] {
+        } else if is_last {
             glyphs.indent
         } else {
             glyphs.vert

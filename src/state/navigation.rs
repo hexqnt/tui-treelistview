@@ -180,13 +180,14 @@ impl<Id: Copy + Eq + Hash> TreeListViewState<Id> {
             }
 
             // Prefer children that themselves have descendants.
-            for idx in selected_idx + 1..self.visible_nodes.len() {
-                let candidate = &self.visible_nodes[idx];
+            let descendants_start = selected_idx + 1;
+            for (offset, candidate) in self.visible_nodes[descendants_start..].iter().enumerate() {
                 let candidate_level = candidate.level;
                 if candidate_level <= level {
                     break;
                 }
                 if candidate_level == level + 1 && candidate.has_children {
+                    let idx = descendants_start + offset;
                     self.list_state.select(Some(idx));
                     return;
                 }
@@ -194,12 +195,13 @@ impl<Id: Copy + Eq + Hash> TreeListViewState<Id> {
         }
 
         // Fallback: pick the next node in the subtree that has children.
-        for idx in selected_idx + 1..self.visible_nodes.len() {
-            let candidate = &self.visible_nodes[idx];
+        let descendants_start = selected_idx + 1;
+        for (offset, candidate) in self.visible_nodes[descendants_start..].iter().enumerate() {
             if candidate.level < level {
                 break;
             }
             if candidate.has_children {
+                let idx = descendants_start + offset;
                 self.list_state.select(Some(idx));
                 return;
             }

@@ -95,7 +95,7 @@ impl<const N: usize, T: TreeModel> SimpleColumns<N, T> {
         label_header: &'static str,
         columns: [ColumnDef<T>; N],
     ) -> Self {
-        let constraints = std::array::from_fn(|idx| columns[idx].constraint);
+        let constraints = columns.each_ref().map(|column| column.constraint);
         Self {
             label_constraint,
             label_header,
@@ -195,23 +195,23 @@ pub fn distribute_widths(total: u16, columns: &[ColumnWidth]) -> SmallVec<[u16; 
     }
 
     // First grow toward ideal widths.
-    for (idx, col) in columns.iter().enumerate() {
+    for (width, col) in widths.iter_mut().zip(columns) {
         if remaining == 0 {
             break;
         }
         let target = col.ideal.max(col.min);
-        let add = target.saturating_sub(widths[idx]).min(remaining);
-        widths[idx] = widths[idx].saturating_add(add);
+        let add = target.saturating_sub(*width).min(remaining);
+        *width = (*width).saturating_add(add);
         remaining = remaining.saturating_sub(add);
     }
 
     // Then expand toward max widths if space remains.
-    for (idx, col) in columns.iter().enumerate() {
+    for (width, col) in widths.iter_mut().zip(columns) {
         if remaining == 0 {
             break;
         }
-        let add = col.max.saturating_sub(widths[idx]).min(remaining);
-        widths[idx] = widths[idx].saturating_add(add);
+        let add = col.max.saturating_sub(*width).min(remaining);
+        *width = (*width).saturating_add(add);
         remaining = remaining.saturating_sub(add);
     }
 
@@ -238,8 +238,9 @@ impl<const N: usize, T: TreeModel> AdaptiveColumns<N, T> {
         columns: [ColumnDef<T>; N],
         column_widths: [ColumnWidth; N],
     ) -> Self {
-        let fallback_constraints =
-            std::array::from_fn(|idx| Constraint::Length(column_widths[idx].ideal));
+        let fallback_constraints = column_widths
+            .each_ref()
+            .map(|width| Constraint::Length(width.ideal));
         Self {
             label_header,
             label_width,

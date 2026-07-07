@@ -243,9 +243,11 @@ impl<Id: Copy + Eq + Hash> TreeListViewState<Id> {
             return;
         }
 
-        let last_idx = children.len().saturating_sub(1);
-        for (idx, child) in children.iter().copied().enumerate() {
-            self.build_visible_nodes(model, child, level + 1, Some(node_id), idx == last_idx);
+        if let Some((&last_child, other_children)) = children.split_last() {
+            for child in other_children.iter().copied() {
+                self.build_visible_nodes(model, child, level + 1, Some(node_id), false);
+            }
+            self.build_visible_nodes(model, last_child, level + 1, Some(node_id), true);
         }
     }
 
@@ -311,17 +313,12 @@ impl<Id: Copy + Eq + Hash> TreeListViewState<Id> {
         self.visible_index.insert(node_id, idx);
 
         let expand_children = ctx.auto_expand || self.is_expanded(parent, node_id);
-        if expand_children && !visible_children.is_empty() {
-            let last_idx = visible_children.len().saturating_sub(1);
-            for (idx, child) in visible_children.iter().copied().enumerate() {
-                self.build_visible_nodes_filtered(
-                    ctx,
-                    child,
-                    level + 1,
-                    Some(node_id),
-                    idx == last_idx,
-                );
+        if expand_children && let Some((last_child, other_children)) = visible_children.split_last()
+        {
+            for child in other_children.iter().copied() {
+                self.build_visible_nodes_filtered(ctx, child, level + 1, Some(node_id), false);
             }
+            self.build_visible_nodes_filtered(ctx, *last_child, level + 1, Some(node_id), true);
         }
 
         true

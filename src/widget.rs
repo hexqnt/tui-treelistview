@@ -226,12 +226,11 @@ where
             (0, total_rows)
         };
 
-        let nodes = &visible_nodes[range_start..range_end];
+        let (previous_nodes, remaining_nodes) = visible_nodes.split_at(range_start);
+        let nodes = &remaining_nodes[..range_end - range_start];
         let mut tail_stack = SmallVec::<[bool; 32]>::new();
-        if range_start > 0 {
-            for node in &visible_nodes[..range_start] {
-                Self::update_tail_stack(&mut tail_stack, node);
-            }
+        for node in previous_nodes {
+            Self::update_tail_stack(&mut tail_stack, node);
         }
         let rows = self.build_rows(nodes, state, &mut tail_stack);
 
