@@ -1,13 +1,13 @@
 use std::hash::Hash;
 
+#[cfg(feature = "keymap")]
+use crossterm::event::KeyEvent;
+
 use crate::action::{TreeAction, TreeEvent};
 use crate::model::{TreeFilter, TreeFilterConfig, TreeModel};
 
 #[cfg(feature = "edit")]
 use crate::edit::TreeEdit;
-
-#[cfg(feature = "keymap")]
-use crossterm::event::KeyEvent;
 
 use super::TreeListViewState;
 

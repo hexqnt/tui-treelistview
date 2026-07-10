@@ -7,20 +7,6 @@
 
 #![allow(clippy::multiple_crate_versions)]
 
-mod action;
-mod columns;
-mod context;
-#[cfg(feature = "edit")]
-mod edit;
-mod glyphs;
-#[cfg(feature = "keymap")]
-mod keymap;
-mod model;
-pub mod prelude;
-mod state;
-mod style;
-mod widget;
-
 pub use action::{TreeAction, TreeEvent};
 pub use columns::{
     AdaptiveColumns, ColumnDef, ColumnFn, ColumnWidth, SimpleColumns, TreeColumns,
@@ -39,3 +25,17 @@ pub use model::{NoFilter, TreeFilter, TreeFilterConfig, TreeModel};
 pub use state::{TreeListViewSnapshot, TreeListViewState};
 pub use style::{TreeListViewStyle, TreeScrollPolicy};
 pub use widget::TreeListView;
+
+mod action;
+mod columns;
+mod context;
+#[cfg(feature = "edit")]
+mod edit;
+mod glyphs;
+#[cfg(feature = "keymap")]
+mod keymap;
+mod model;
+pub mod prelude;
+mod state;
+mod style;
+mod widget;

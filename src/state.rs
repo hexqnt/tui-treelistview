@@ -42,12 +42,6 @@ impl<Id> From<(Option<Id>, Id)> for ExpansionPath<Id> {
     }
 }
 
-impl<Id> From<ExpansionPath<Id>> for (Option<Id>, Id) {
-    fn from(value: ExpansionPath<Id>) -> Self {
-        (value.parent, value.id)
-    }
-}
-
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct SelectedNode<Id> {
     id: Id,
@@ -80,32 +74,6 @@ pub struct TreeListViewState<Id> {
     mark_seeds: FxHashSet<Id>,
     #[cfg(feature = "keymap")]
     keymap: TreeKeyBindings,
-}
-
-/// Snapshot of state (selection, expansion, marks).
-///
-/// With the `serde` feature enabled, this type derives `Serialize`/`Deserialize`.
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct TreeListViewSnapshot<Id> {
-    /// Expanded nodes as `(parent, id)` pairs.
-    pub expanded: Vec<(Option<Id>, Id)>,
-    /// Nodes explicitly marked by the user.
-    pub manual_marked: Vec<Id>,
-    /// Selected row index in the visible list.
-    pub selected: Option<usize>,
-    /// Selected column index in the table state.
-    pub selected_column: Option<usize>,
-    /// Scroll offset within the visible list.
-    pub offset: usize,
-    /// Whether guide lines were enabled.
-    pub draw_lines: bool,
-}
-
-impl<Id: Copy + Eq + Hash> Default for TreeListViewState<Id> {
-    fn default() -> Self {
-        Self::new()
-    }
 }
 
 impl<Id: Copy + Eq + Hash> TreeListViewState<Id> {
@@ -234,6 +202,38 @@ impl<Id: Copy + Eq + Hash> TreeListViewState<Id> {
     pub const fn invalidate_all(&mut self) {
         self.dirty = true;
         self.marks_dirty = true;
+    }
+}
+
+impl<Id: Copy + Eq + Hash> Default for TreeListViewState<Id> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// Snapshot of state (selection, expansion, marks).
+///
+/// With the `serde` feature enabled, this type derives `Serialize`/`Deserialize`.
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TreeListViewSnapshot<Id> {
+    /// Expanded nodes as `(parent, id)` pairs.
+    pub expanded: Vec<(Option<Id>, Id)>,
+    /// Nodes explicitly marked by the user.
+    pub manual_marked: Vec<Id>,
+    /// Selected row index in the visible list.
+    pub selected: Option<usize>,
+    /// Selected column index in the table state.
+    pub selected_column: Option<usize>,
+    /// Scroll offset within the visible list.
+    pub offset: usize,
+    /// Whether guide lines were enabled.
+    pub draw_lines: bool,
+}
+
+impl<Id> From<ExpansionPath<Id>> for (Option<Id>, Id) {
+    fn from(value: ExpansionPath<Id>) -> Self {
+        (value.parent, value.id)
     }
 }
 

@@ -211,18 +211,6 @@ impl TreeLabelProvider<FsModel> for Label {
     }
 }
 
-fn size_cell(model: &FsModel, id: usize) -> Cell<'_> {
-    Cell::from(model.nodes[id].size.as_str())
-}
-
-fn perms_cell(model: &FsModel, id: usize) -> Cell<'_> {
-    Cell::from(model.nodes[id].perms.as_str())
-}
-
-fn modified_cell(model: &FsModel, id: usize) -> Cell<'_> {
-    Cell::from(model.nodes[id].modified.as_str())
-}
-
 struct DemoArgs {
     root: PathBuf,
     max_depth: usize,
@@ -277,6 +265,18 @@ struct EntryInfo {
     path: PathBuf,
     metadata: fs::Metadata,
     is_dir: bool,
+}
+
+fn size_cell(model: &FsModel, id: usize) -> Cell<'_> {
+    Cell::from(model.nodes[id].size.as_str())
+}
+
+fn perms_cell(model: &FsModel, id: usize) -> Cell<'_> {
+    Cell::from(model.nodes[id].perms.as_str())
+}
+
+fn modified_cell(model: &FsModel, id: usize) -> Cell<'_> {
+    Cell::from(model.nodes[id].modified.as_str())
 }
 
 fn build_model(root: &Path, max_depth: usize) -> io::Result<FsModel> {

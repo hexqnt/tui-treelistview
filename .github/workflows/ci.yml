@@ -28,10 +28,14 @@ jobs:
       - name: Format
         run: cargo fmt --all -- --check
 
-      # - name: Clippy
-        # run: cargo clippy --all-targets --all-features -- -D warnings
+      - name: Clippy
+        run: cargo clippy --all-targets --all-features --locked -- -D warnings
+
       - name: Check
-        run: cargo check
+        run: cargo check --all-targets --all-features --locked
 
       - name: Tests
-        run: cargo test --all-features
+        run: cargo test --all-features --locked
+
+      - name: Package
+        run: cargo publish --dry-run --locked

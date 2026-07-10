@@ -5,26 +5,8 @@ use smallvec::SmallVec;
 
 use crate::model::TreeModel;
 
-/// Column layout and cell rendering for tree rows.
-pub trait TreeColumns<T: TreeModel> {
-    /// Returns the constraint for the label (tree) column.
-    fn label_constraint(&self) -> Constraint;
-    /// Returns constraints for the additional columns.
-    fn other_constraints(&self) -> &[Constraint];
-    /// Returns an optional header row for the table.
-    fn header(&self) -> Option<Row<'_>> {
-        None
-    }
-    /// Returns cells for the additional columns of a row.
-    fn cells<'a>(&'a self, model: &'a T, id: T::Id) -> SmallVec<[Cell<'a>; 8]>;
-    /// Returns constraints for all columns based on the available area.
-    fn constraints_for_area(&self, _area: Rect) -> SmallVec<[Constraint; 8]> {
-        let mut constraints = SmallVec::<[Constraint; 8]>::new();
-        constraints.push(self.label_constraint());
-        constraints.extend_from_slice(self.other_constraints());
-        constraints
-    }
-}
+/// Function pointer type for rendering a single column cell.
+pub type ColumnFn<T> = for<'a> fn(&'a T, <T as TreeModel>::Id) -> Cell<'a>;
 
 /// Simple container for a label constraint and a fixed set of other constraints.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -52,9 +34,6 @@ impl<const N: usize> TreeColumnsLayout<N> {
         &self.other
     }
 }
-
-/// Function pointer type for rendering a single column cell.
-pub type ColumnFn<T> = for<'a> fn(&'a T, <T as TreeModel>::Id) -> Cell<'a>;
 
 /// Column definition: header label, width constraint, and cell renderer.
 #[derive(Clone, Copy, Debug)]
@@ -178,48 +157,6 @@ impl ColumnWidth {
     }
 }
 
-/// Distributes `total` width across columns respecting `min`/`ideal`/`max`.
-///
-/// If `total` is outside the feasible range (`sum(min)`..=`sum(max)`), the returned widths are
-/// clamped to `min` or `max` respectively (so the sum may differ from `total`).
-#[must_use]
-pub fn distribute_widths(total: u16, columns: &[ColumnWidth]) -> SmallVec<[u16; 8]> {
-    let mut widths = SmallVec::<[u16; 8]>::with_capacity(columns.len());
-    let mut min_sum: u16 = 0;
-    for col in columns {
-        min_sum = min_sum.saturating_add(col.min);
-        widths.push(col.min);
-    }
-
-    let mut remaining = total.saturating_sub(min_sum);
-    if remaining == 0 {
-        return widths;
-    }
-
-    // First grow toward ideal widths.
-    for (width, col) in widths.iter_mut().zip(columns) {
-        if remaining == 0 {
-            break;
-        }
-        let target = col.ideal.max(col.min);
-        let add = target.saturating_sub(*width).min(remaining);
-        *width = (*width).saturating_add(add);
-        remaining = remaining.saturating_sub(add);
-    }
-
-    // Then expand toward max widths if space remains.
-    for (width, col) in widths.iter_mut().zip(columns) {
-        if remaining == 0 {
-            break;
-        }
-        let add = col.max.saturating_sub(*width).min(remaining);
-        *width = (*width).saturating_add(add);
-        remaining = remaining.saturating_sub(add);
-    }
-
-    widths
-}
-
 /// Adaptive layout that fits columns into the available area.
 pub struct AdaptiveColumns<const N: usize, T: TreeModel> {
     label_header: &'static str,
@@ -312,6 +249,69 @@ impl<const N: usize, T: TreeModel> TreeColumns<T> for AdaptiveColumns<N, T> {
         }
         constraints
     }
+}
+
+/// Column layout and cell rendering for tree rows.
+pub trait TreeColumns<T: TreeModel> {
+    /// Returns the constraint for the label (tree) column.
+    fn label_constraint(&self) -> Constraint;
+    /// Returns constraints for the additional columns.
+    fn other_constraints(&self) -> &[Constraint];
+    /// Returns an optional header row for the table.
+    fn header(&self) -> Option<Row<'_>> {
+        None
+    }
+    /// Returns cells for the additional columns of a row.
+    fn cells<'a>(&'a self, model: &'a T, id: T::Id) -> SmallVec<[Cell<'a>; 8]>;
+    /// Returns constraints for all columns based on the available area.
+    fn constraints_for_area(&self, _area: Rect) -> SmallVec<[Constraint; 8]> {
+        let mut constraints = SmallVec::<[Constraint; 8]>::new();
+        constraints.push(self.label_constraint());
+        constraints.extend_from_slice(self.other_constraints());
+        constraints
+    }
+}
+
+/// Distributes `total` width across columns respecting `min`/`ideal`/`max`.
+///
+/// If `total` is outside the feasible range (`sum(min)`..=`sum(max)`), the returned widths are
+/// clamped to `min` or `max` respectively (so the sum may differ from `total`).
+#[must_use]
+pub fn distribute_widths(total: u16, columns: &[ColumnWidth]) -> SmallVec<[u16; 8]> {
+    let mut widths = SmallVec::<[u16; 8]>::with_capacity(columns.len());
+    let mut min_sum: u16 = 0;
+    for col in columns {
+        min_sum = min_sum.saturating_add(col.min);
+        widths.push(col.min);
+    }
+
+    let mut remaining = total.saturating_sub(min_sum);
+    if remaining == 0 {
+        return widths;
+    }
+
+    // First grow toward ideal widths.
+    for (width, col) in widths.iter_mut().zip(columns) {
+        if remaining == 0 {
+            break;
+        }
+        let target = col.ideal.max(col.min);
+        let add = target.saturating_sub(*width).min(remaining);
+        *width = (*width).saturating_add(add);
+        remaining = remaining.saturating_sub(add);
+    }
+
+    // Then expand toward max widths if space remains.
+    for (width, col) in widths.iter_mut().zip(columns) {
+        if remaining == 0 {
+            break;
+        }
+        let add = col.max.saturating_sub(*width).min(remaining);
+        *width = (*width).saturating_add(add);
+        remaining = remaining.saturating_sub(add);
+    }
+
+    widths
 }
 
 #[cfg(test)]

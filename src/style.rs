@@ -36,23 +36,6 @@ pub struct TreeListViewStyle<'a> {
     pub scroll_policy: TreeScrollPolicy,
 }
 
-impl Default for TreeListViewStyle<'_> {
-    fn default() -> Self {
-        Self {
-            title: None,
-            block_style: Style::default(),
-            border_style: Style::default(),
-            highlight_style: Style::default(),
-            mark_style: Style::default(),
-            line_style: Style::default(),
-            highlight_symbol: ">> ",
-            borders: Borders::ALL,
-            virtualize_rows: false,
-            scroll_policy: TreeScrollPolicy::KeepInView,
-        }
-    }
-}
-
 impl TreeListViewStyle<'_> {
     /// Creates default style without borders.
     #[must_use]
@@ -69,6 +52,22 @@ impl TreeListViewStyle<'_> {
         Self {
             virtualize_rows: true,
             ..Self::default()
+        }
+    }
+}
+impl Default for TreeListViewStyle<'_> {
+    fn default() -> Self {
+        Self {
+            title: None,
+            block_style: Style::default(),
+            border_style: Style::default(),
+            highlight_style: Style::default(),
+            mark_style: Style::default(),
+            line_style: Style::default(),
+            highlight_symbol: ">> ",
+            borders: Borders::ALL,
+            virtualize_rows: false,
+            scroll_policy: TreeScrollPolicy::KeepInView,
         }
     }
 }

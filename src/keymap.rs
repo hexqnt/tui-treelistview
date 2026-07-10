@@ -20,12 +20,6 @@ pub struct TreeKeyBindings {
     profile: KeymapProfile,
 }
 
-impl Default for TreeKeyBindings {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 impl TreeKeyBindings {
     /// Creates bindings with the default profile.
     #[must_use]
@@ -136,6 +130,12 @@ impl TreeKeyBindings {
             KeyCode::End => Some(TreeAction::SelectLast),
             _ => None,
         }
+    }
+}
+
+impl Default for TreeKeyBindings {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
