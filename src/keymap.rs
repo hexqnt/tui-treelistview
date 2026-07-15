@@ -1,27 +1,23 @@
-use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 
-use crate::action::TreeAction;
+use crate::action::{TreeAction, TreeEditAction, TreeViewAction};
 
-/// Navigation key profiles.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+/// A key profile for vertical and hierarchical navigation.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum KeymapProfile {
-    /// Arrow keys plus Vim-like alternatives.
     #[default]
     Default,
-    /// Vim-only navigation (h/j/k/l).
     Vim,
-    /// Arrow-only navigation.
     Arrows,
 }
 
-/// Key bindings resolver for tree actions.
+/// A stateless key resolver stored with view state for convenient profile switching.
 #[derive(Clone, Copy, Debug)]
 pub struct TreeKeyBindings {
     profile: KeymapProfile,
 }
 
 impl TreeKeyBindings {
-    /// Creates bindings with the default profile.
     #[must_use]
     pub const fn new() -> Self {
         Self {
@@ -29,105 +25,143 @@ impl TreeKeyBindings {
         }
     }
 
-    /// Creates bindings with a specific profile.
     #[must_use]
     pub const fn with_profile(profile: KeymapProfile) -> Self {
         Self { profile }
     }
 
-    /// Returns the current keymap profile.
     #[must_use]
     pub const fn profile(&self) -> KeymapProfile {
         self.profile
     }
 
-    /// Sets the active keymap profile.
     pub const fn set_profile(&mut self, profile: KeymapProfile) {
         self.profile = profile;
     }
 
-    /// Resolves a key event into a tree action.
+    /// Resolves only press/repeat events and handles modifiers explicitly.
+    #[must_use]
     pub fn resolve<C>(&self, key: KeyEvent) -> Option<TreeAction<C>> {
-        // Shift-modified shortcuts take priority over profile navigation.
-        if key.modifiers.contains(KeyModifiers::SHIFT) {
-            match key.code {
-                KeyCode::Up => return Some(TreeAction::ReorderUp),
-                KeyCode::Down => return Some(TreeAction::ReorderDown),
-                KeyCode::Delete => return Some(TreeAction::DeleteNode),
-                _ => {}
+        if key.kind == KeyEventKind::Release {
+            return None;
+        }
+
+        match (key.code, key.modifiers) {
+            (KeyCode::Up, KeyModifiers::SHIFT) => {
+                return Some(TreeEditAction::ReorderUp.into());
             }
+            (KeyCode::Down, KeyModifiers::SHIFT) => {
+                return Some(TreeEditAction::ReorderDown.into());
+            }
+            (KeyCode::Delete, KeyModifiers::SHIFT) => {
+                return Some(TreeEditAction::Delete.into());
+            }
+            (KeyCode::Left, KeyModifiers::CONTROL) => {
+                return Some(TreeViewAction::ScrollLeft.into());
+            }
+            (KeyCode::Right, KeyModifiers::CONTROL) => {
+                return Some(TreeViewAction::ScrollRight.into());
+            }
+            _ => {}
         }
 
-        let nav_action = match self.profile {
-            KeymapProfile::Default => Self::resolve_default_nav(key),
-            KeymapProfile::Vim => Self::resolve_vim_nav(key),
-            KeymapProfile::Arrows => Self::resolve_arrow_nav(key),
-        };
-        if nav_action.is_some() {
-            return nav_action;
+        if key.modifiers.is_empty()
+            && let Some(action) = Self::navigation(self.profile, key.code)
+        {
+            return Some(action.into());
         }
 
-        Self::resolve_common(key)
+        Self::common(key)
     }
 
-    /// Resolves a key event with a custom mapping first.
+    #[must_use]
     pub fn resolve_with<C, F>(&self, key: KeyEvent, custom: F) -> Option<TreeAction<C>>
     where
         F: Fn(KeyEvent) -> Option<C>,
     {
-        if let Some(action) = custom(key) {
-            return Some(TreeAction::Custom(action));
-        }
-
-        self.resolve(key)
+        custom(key)
+            .map(TreeAction::Custom)
+            .or_else(|| self.resolve(key))
     }
 
-    const fn resolve_default_nav<C>(key: KeyEvent) -> Option<TreeAction<C>> {
-        match key.code {
-            KeyCode::Up | KeyCode::Char('k') => Some(TreeAction::SelectPrev),
-            KeyCode::Down | KeyCode::Char('j') => Some(TreeAction::SelectNext),
-            KeyCode::Left | KeyCode::Char('h') => Some(TreeAction::SelectParent),
-            KeyCode::Right | KeyCode::Char('l') => Some(TreeAction::SelectChild),
+    const fn navigation(profile: KeymapProfile, code: KeyCode) -> Option<TreeViewAction> {
+        match (profile, code) {
+            (KeymapProfile::Default, KeyCode::Up | KeyCode::Char('k'))
+            | (KeymapProfile::Vim, KeyCode::Char('k'))
+            | (KeymapProfile::Arrows, KeyCode::Up) => Some(TreeViewAction::SelectPrev),
+            (KeymapProfile::Default, KeyCode::Down | KeyCode::Char('j'))
+            | (KeymapProfile::Vim, KeyCode::Char('j'))
+            | (KeymapProfile::Arrows, KeyCode::Down) => Some(TreeViewAction::SelectNext),
+            (KeymapProfile::Default, KeyCode::Left | KeyCode::Char('h'))
+            | (KeymapProfile::Vim, KeyCode::Char('h'))
+            | (KeymapProfile::Arrows, KeyCode::Left) => {
+                Some(TreeViewAction::CollapseOrSelectParent)
+            }
+            (KeymapProfile::Default, KeyCode::Right | KeyCode::Char('l'))
+            | (KeymapProfile::Vim, KeyCode::Char('l'))
+            | (KeymapProfile::Arrows, KeyCode::Right) => {
+                Some(TreeViewAction::ExpandOrSelectFirstChild)
+            }
             _ => None,
         }
     }
 
-    const fn resolve_vim_nav<C>(key: KeyEvent) -> Option<TreeAction<C>> {
-        match key.code {
-            KeyCode::Char('k') => Some(TreeAction::SelectPrev),
-            KeyCode::Char('j') => Some(TreeAction::SelectNext),
-            KeyCode::Char('h') => Some(TreeAction::SelectParent),
-            KeyCode::Char('l') => Some(TreeAction::SelectChild),
-            _ => None,
-        }
-    }
-
-    const fn resolve_arrow_nav<C>(key: KeyEvent) -> Option<TreeAction<C>> {
-        match key.code {
-            KeyCode::Up => Some(TreeAction::SelectPrev),
-            KeyCode::Down => Some(TreeAction::SelectNext),
-            KeyCode::Left => Some(TreeAction::SelectParent),
-            KeyCode::Right => Some(TreeAction::SelectChild),
-            _ => None,
-        }
-    }
-
-    const fn resolve_common<C>(key: KeyEvent) -> Option<TreeAction<C>> {
-        match key.code {
-            KeyCode::Char(' ') => Some(TreeAction::ToggleRecursive),
-            KeyCode::Enter => Some(TreeAction::ToggleNode),
-            KeyCode::Char('E') => Some(TreeAction::ExpandAll),
-            KeyCode::Char('C') => Some(TreeAction::CollapseAll),
-            KeyCode::Char('a' | '+') => Some(TreeAction::AddChild),
-            KeyCode::Char('e') => Some(TreeAction::EditNode),
-            KeyCode::Delete | KeyCode::Char('d') => Some(TreeAction::DetachNode),
-            KeyCode::Char('D') => Some(TreeAction::DeleteNode),
-            KeyCode::Char('y') => Some(TreeAction::YankNode),
-            KeyCode::Char('p') => Some(TreeAction::PasteNode),
-            KeyCode::Char('g') => Some(TreeAction::ToggleGuides),
-            KeyCode::Char('m' | 'M') => Some(TreeAction::ToggleMark),
-            KeyCode::Home => Some(TreeAction::SelectFirst),
-            KeyCode::End => Some(TreeAction::SelectLast),
+    const fn common<C>(key: KeyEvent) -> Option<TreeAction<C>> {
+        match (key.code, key.modifiers) {
+            (KeyCode::Char(' '), KeyModifiers::NONE) => {
+                Some(TreeAction::View(TreeViewAction::ToggleRecursive))
+            }
+            (KeyCode::Enter, KeyModifiers::NONE) => {
+                Some(TreeAction::View(TreeViewAction::ToggleNode))
+            }
+            (KeyCode::Char('E'), KeyModifiers::SHIFT | KeyModifiers::NONE) => {
+                Some(TreeAction::View(TreeViewAction::ExpandAll))
+            }
+            (KeyCode::Char('C'), KeyModifiers::SHIFT | KeyModifiers::NONE) => {
+                Some(TreeAction::View(TreeViewAction::CollapseAll))
+            }
+            (KeyCode::Char('a' | '+'), KeyModifiers::NONE) => {
+                Some(TreeAction::Edit(TreeEditAction::AddChild))
+            }
+            (KeyCode::Char('e'), KeyModifiers::NONE) => {
+                Some(TreeAction::Edit(TreeEditAction::Rename))
+            }
+            (KeyCode::Delete | KeyCode::Char('d'), KeyModifiers::NONE) => {
+                Some(TreeAction::Edit(TreeEditAction::Detach))
+            }
+            (KeyCode::Char('D'), KeyModifiers::SHIFT | KeyModifiers::NONE) => {
+                Some(TreeAction::Edit(TreeEditAction::Delete))
+            }
+            (KeyCode::Char('y'), KeyModifiers::NONE) => {
+                Some(TreeAction::Edit(TreeEditAction::Yank))
+            }
+            (KeyCode::Char('p'), KeyModifiers::NONE) => {
+                Some(TreeAction::Edit(TreeEditAction::Paste))
+            }
+            (KeyCode::Char('g'), KeyModifiers::NONE) => {
+                Some(TreeAction::View(TreeViewAction::ToggleGuides))
+            }
+            (KeyCode::Char('m' | 'M'), KeyModifiers::NONE | KeyModifiers::SHIFT) => {
+                Some(TreeAction::View(TreeViewAction::ToggleMark))
+            }
+            (KeyCode::Home, KeyModifiers::NONE) => {
+                Some(TreeAction::View(TreeViewAction::SelectFirst))
+            }
+            (KeyCode::End, KeyModifiers::NONE) => {
+                Some(TreeAction::View(TreeViewAction::SelectLast))
+            }
+            (KeyCode::Tab, KeyModifiers::NONE) => {
+                Some(TreeAction::View(TreeViewAction::SelectColumnRight))
+            }
+            (KeyCode::BackTab, KeyModifiers::SHIFT | KeyModifiers::NONE) => {
+                Some(TreeAction::View(TreeViewAction::SelectColumnLeft))
+            }
+            (KeyCode::PageUp, KeyModifiers::NONE) => {
+                Some(TreeAction::View(TreeViewAction::ScrollViewUp))
+            }
+            (KeyCode::PageDown, KeyModifiers::NONE) => {
+                Some(TreeAction::View(TreeViewAction::ScrollViewDown))
+            }
             _ => None,
         }
     }
@@ -144,20 +178,42 @@ mod tests {
     use super::*;
 
     #[test]
-    fn resolve_expand_collapse_keys() {
+    fn ignores_release_and_unrelated_modifiers() {
         let bindings = TreeKeyBindings::new();
+        let release =
+            KeyEvent::new_with_kind(KeyCode::Down, KeyModifiers::NONE, KeyEventKind::Release);
+        assert_eq!(bindings.resolve::<()>(release), None);
 
-        let expand = KeyEvent::new(KeyCode::Char('E'), KeyModifiers::NONE);
-        let collapse = KeyEvent::new(KeyCode::Char('C'), KeyModifiers::NONE);
-        let edit = KeyEvent::new(KeyCode::Char('e'), KeyModifiers::NONE);
-        let lowercase_c = KeyEvent::new(KeyCode::Char('c'), KeyModifiers::NONE);
+        let control_e = KeyEvent::new(KeyCode::Char('e'), KeyModifiers::CONTROL);
+        assert_eq!(bindings.resolve::<()>(control_e), None);
+    }
 
-        assert_eq!(bindings.resolve::<()>(expand), Some(TreeAction::ExpandAll));
+    #[test]
+    fn resolves_standard_tree_navigation() {
+        let bindings = TreeKeyBindings::new();
+        let right = KeyEvent::new(KeyCode::Right, KeyModifiers::NONE);
         assert_eq!(
-            bindings.resolve::<()>(collapse),
-            Some(TreeAction::CollapseAll)
+            bindings.resolve::<()>(right),
+            Some(TreeViewAction::ExpandOrSelectFirstChild.into())
         );
-        assert_eq!(bindings.resolve::<()>(edit), Some(TreeAction::EditNode));
-        assert_eq!(bindings.resolve::<()>(lowercase_c), None);
+    }
+
+    #[test]
+    fn navigation_profiles_share_actions_but_restrict_keys() {
+        let up = KeyEvent::new(KeyCode::Up, KeyModifiers::NONE);
+        let k = KeyEvent::new(KeyCode::Char('k'), KeyModifiers::NONE);
+        let vim = TreeKeyBindings::with_profile(KeymapProfile::Vim);
+        let arrows = TreeKeyBindings::with_profile(KeymapProfile::Arrows);
+
+        assert_eq!(vim.resolve::<()>(up), None);
+        assert_eq!(
+            vim.resolve::<()>(k),
+            Some(TreeViewAction::SelectPrev.into())
+        );
+        assert_eq!(arrows.resolve::<()>(k), None);
+        assert_eq!(
+            arrows.resolve::<()>(up),
+            Some(TreeViewAction::SelectPrev.into())
+        );
     }
 }

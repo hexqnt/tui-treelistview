@@ -1,14 +1,15 @@
 use std::hint::black_box;
 
 use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};
-use ratatui::layout::{Constraint, Rect};
+use ratatui::layout::Rect;
 use ratatui::prelude::Buffer;
 use ratatui::widgets::{Cell, StatefulWidget};
-use smallvec::SmallVec;
 
 use tui_treelistview::{
-    TreeAction, TreeColumns, TreeFilterConfig, TreeGlyphs, TreeLabelRenderer, TreeListView,
-    TreeListViewState, TreeListViewStyle, TreeModel, TreeRowContext,
+    ColumnDef, ColumnWidth, NoFilter, NoSort, TreeChildren, TreeColumnSet, TreeFilter,
+    TreeFilterConfig, TreeGlyphs, TreeLabelRenderer, TreeListView, TreeListViewState,
+    TreeListViewStyle, TreeModel, TreeQuery, TreeRevision, TreeRowContext, TreeRowRendering,
+    TreeSort,
 };
 
 struct BenchTree {
@@ -40,16 +41,16 @@ impl BenchTree {
 impl TreeModel for BenchTree {
     type Id = usize;
 
-    fn root(&self) -> Option<Self::Id> {
-        Some(0)
+    fn roots(&self) -> impl Iterator<Item = Self::Id> + '_ {
+        std::iter::once(0)
     }
 
-    fn children(&self, id: Self::Id) -> &[Self::Id] {
-        &self.children[id]
+    fn children(&self, id: Self::Id) -> TreeChildren<'_, Self::Id> {
+        TreeChildren::loaded(&self.children[id])
     }
 
-    fn contains(&self, id: Self::Id) -> bool {
-        id < self.children.len()
+    fn revision(&self) -> TreeRevision {
+        TreeRevision::INITIAL
     }
 
     fn size_hint(&self) -> usize {
@@ -64,52 +65,49 @@ impl TreeLabelRenderer<BenchTree> for Label {
         &'a self,
         _model: &'a BenchTree,
         _id: usize,
-        _ctx: &TreeRowContext,
+        _context: &TreeRowContext<'_>,
         _glyphs: &TreeGlyphs<'a>,
     ) -> Cell<'a> {
         Cell::from("node")
     }
 }
 
-struct Columns;
-
-impl TreeColumns<BenchTree> for Columns {
-    fn label_constraint(&self) -> Constraint {
-        Constraint::Fill(1)
-    }
-
-    fn other_constraints(&self) -> &[Constraint] {
-        &[]
-    }
-
-    fn cells<'a>(&'a self, _model: &'a BenchTree, _id: usize) -> SmallVec<[Cell<'a>; 8]> {
-        SmallVec::new()
-    }
+fn columns() -> TreeColumnSet<'static, BenchTree> {
+    TreeColumnSet::new([ColumnDef::tree(
+        "Name",
+        ColumnWidth::flexible(12, 48).expect("valid static column width"),
+    )])
+    .expect("one tree column")
 }
 
 const fn sparse_filter(_: &BenchTree, id: usize) -> bool {
     id.is_multiple_of(17)
 }
 
-fn expanded_state(model: &BenchTree) -> TreeListViewState<usize> {
+fn expanded_state<F, S>(model: &BenchTree, query: &TreeQuery<F, S>) -> TreeListViewState<usize>
+where
+    F: TreeFilter<BenchTree>,
+    S: TreeSort<BenchTree>,
+{
     let mut state = TreeListViewState::with_capacity(model.size_hint());
-    state.expand_all(model);
-    state.ensure_visible_nodes(model);
-    state.select_first();
+    let _ = state.expand_all(model);
+    let _ = state.ensure_projection(model, query);
+    let _ = state.select_first();
     state
 }
 
-fn bench_ensure_visible_nodes(c: &mut Criterion) {
-    let mut group = c.benchmark_group("ensure_visible_nodes");
+fn bench_projection(c: &mut Criterion) {
+    let mut group = c.benchmark_group("projection/rebuild");
 
     for size in [5_000usize, 10_000, 20_000] {
         let model = BenchTree::generate(size, 4);
-        let mut state = expanded_state(&model);
+        let mut query = TreeQuery::<NoFilter, NoSort>::new();
+        let mut state = expanded_state(&model, &query);
 
         group.bench_with_input(BenchmarkId::from_parameter(size), &size, |b, _| {
             b.iter(|| {
-                state.invalidate();
-                state.ensure_visible_nodes(black_box(&model));
+                query.touch_sort();
+                let _ = state.ensure_projection(black_box(&model), black_box(&query));
                 black_box(state.visible_len());
             });
         });
@@ -118,25 +116,24 @@ fn bench_ensure_visible_nodes(c: &mut Criterion) {
     group.finish();
 }
 
-fn bench_ensure_visible_nodes_filtered(c: &mut Criterion) {
-    let mut group = c.benchmark_group("ensure_visible_nodes_filtered");
+fn bench_filtered_projection(c: &mut Criterion) {
+    let mut group = c.benchmark_group("projection/filter");
 
     for size in [5_000usize, 10_000, 20_000] {
         let model = BenchTree::generate(size, 4);
-        let mut state = TreeListViewState::with_capacity(model.size_hint());
 
-        for auto_expand in [false, true] {
-            let config = TreeFilterConfig::Enabled { auto_expand };
-            let bench_name = if auto_expand {
-                format!("{size}/auto_expand")
-            } else {
-                format!("{size}/manual_expand")
-            };
+        for (name, config) in [
+            ("auto_expand", TreeFilterConfig::enabled()),
+            ("manual_expand", TreeFilterConfig::enabled_manual_expand()),
+        ] {
+            let mut query =
+                TreeQuery::new().with_filter(sparse_filter, config, TreeRevision::INITIAL);
+            let mut state = TreeListViewState::with_capacity(model.size_hint());
 
-            group.bench_with_input(BenchmarkId::from_parameter(bench_name), &size, |b, _| {
+            group.bench_with_input(BenchmarkId::new(name, size), &size, |b, _| {
                 b.iter(|| {
-                    state.invalidate();
-                    state.ensure_visible_nodes_filtered(black_box(&model), &sparse_filter, config);
+                    query.touch_filter();
+                    let _ = state.ensure_projection(black_box(&model), black_box(&query));
                     black_box(state.visible_len());
                 });
             });
@@ -146,18 +143,18 @@ fn bench_ensure_visible_nodes_filtered(c: &mut Criterion) {
     group.finish();
 }
 
-fn bench_ensure_mark_cache(c: &mut Criterion) {
-    let mut group = c.benchmark_group("ensure_mark_cache_after_toggle");
+fn bench_mark_states(c: &mut Criterion) {
+    let mut group = c.benchmark_group("marks/rebuild_after_toggle");
 
     for size in [5_000usize, 10_000, 20_000] {
         let model = BenchTree::generate(size, 4);
-        let mut state = expanded_state(&model);
+        let mut state = TreeListViewState::with_capacity(model.size_hint());
 
         group.bench_with_input(BenchmarkId::from_parameter(size), &size, |b, _| {
             b.iter(|| {
-                let _ = state.handle_action(black_box(&model), TreeAction::<()>::ToggleMark);
-                state.ensure_mark_cache(black_box(&model));
-                black_box(state.node_is_marked(0));
+                let _ = state.toggle_marked(size - 1);
+                state.ensure_mark_states(black_box(&model));
+                black_box(state.mark_state(0));
             });
         });
     }
@@ -165,35 +162,53 @@ fn bench_ensure_mark_cache(c: &mut Criterion) {
     group.finish();
 }
 
-fn bench_render_row_build(c: &mut Criterion) {
-    let mut group = c.benchmark_group("render_row_build");
+fn bench_render(c: &mut Criterion) {
+    let mut group = c.benchmark_group("render/rows");
 
     for size in [5_000usize, 10_000, 20_000] {
         let model = BenchTree::generate(size, 4);
+        let query = TreeQuery::new();
         let label = Label;
-        let columns = Columns;
-        let mut state = expanded_state(&model);
+        let columns = columns();
         let area = Rect::new(0, 0, 100, 25);
-        let mut buffer = Buffer::empty(area);
 
-        for virtualize_rows in [false, true] {
-            let style = TreeListViewStyle {
-                virtualize_rows,
-                ..TreeListViewStyle::default()
+        for rendering in [TreeRowRendering::Full, TreeRowRendering::Virtualized] {
+            let rendering_name = match rendering {
+                TreeRowRendering::Full => "full",
+                TreeRowRendering::Virtualized => "virtualized",
             };
-            let bench_name = if virtualize_rows {
-                format!("{size}/virtualized")
-            } else {
-                format!("{size}/full")
-            };
+            for (offset_name, offset) in [
+                ("start", 0),
+                ("middle", size / 2),
+                ("end", size.saturating_sub(1)),
+            ] {
+                let mut state = expanded_state(&model, &query);
+                let _ = state.set_offset(offset);
+                let mut buffer = Buffer::empty(area);
+                let style = TreeListViewStyle {
+                    row_rendering: rendering,
+                    ..TreeListViewStyle::default()
+                };
 
-            group.bench_with_input(BenchmarkId::from_parameter(bench_name), &size, |b, _| {
-                b.iter(|| {
-                    let widget = TreeListView::new(&model, &label, &columns, style.clone());
-                    widget.render(area, &mut buffer, &mut state);
-                    black_box(state.visible_len());
-                });
-            });
+                group.bench_with_input(
+                    BenchmarkId::new(format!("{rendering_name}/{offset_name}"), size),
+                    &size,
+                    |b, _| {
+                        b.iter(|| {
+                            buffer.reset();
+                            TreeListView::new(
+                                black_box(&model),
+                                black_box(&query),
+                                &label,
+                                &columns,
+                                style.clone(),
+                            )
+                            .render(area, &mut buffer, &mut state);
+                            black_box(state.visible_len());
+                        });
+                    },
+                );
+            }
         }
     }
 
@@ -202,9 +217,9 @@ fn bench_render_row_build(c: &mut Criterion) {
 
 criterion_group!(
     benches,
-    bench_ensure_visible_nodes,
-    bench_ensure_visible_nodes_filtered,
-    bench_ensure_mark_cache,
-    bench_render_row_build,
+    bench_projection,
+    bench_filtered_projection,
+    bench_mark_states,
+    bench_render,
 );
 criterion_main!(benches);

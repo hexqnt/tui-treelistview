@@ -3,312 +3,305 @@ use std::hash::Hash;
 #[cfg(feature = "keymap")]
 use crossterm::event::KeyEvent;
 
-use crate::action::{TreeAction, TreeEvent};
-use crate::model::{TreeFilter, TreeFilterConfig, TreeModel};
-
-#[cfg(feature = "edit")]
-use crate::edit::TreeEdit;
+use crate::action::{
+    TreeAction, TreeEditAction, TreeEditRequest, TreeEvent, TreeIntent, TreeViewAction,
+};
+use crate::columns::TreeColumns;
+use crate::context::TreeExpansionState;
+use crate::edit::{TreeChangeSet, TreeEditCommand, TreeEditor, TreeSelectionUpdate};
+use crate::model::{TreeFilter, TreeModel, TreeQuery, TreeSort};
 
 use super::TreeListViewState;
 
-impl<Id: Copy + Eq + Hash> TreeListViewState<Id> {
-    /// Handles a tree action and returns the resulting event.
-    pub fn handle_action<T: TreeModel<Id = Id>, C>(
-        &mut self,
-        model: &T,
-        action: TreeAction<C>,
-    ) -> TreeEvent<C> {
-        self.ensure_visible_nodes(model);
-        let mut rebuild_visible = |state: &mut Self, model: &T| state.update_visible_nodes(model);
-        self.handle_action_inner(model, action, &mut rebuild_visible)
-    }
+#[derive(Clone, Copy)]
+enum ExpansionAction {
+    Expand,
+    Toggle,
+}
 
-    /// Handles a tree action with filtering enabled and returns the resulting event.
-    pub fn handle_action_filtered<T, F, C>(
+impl<Id: Copy + Eq + Hash> TreeListViewState<Id> {
+    /// Handles an action against the current projection.
+    pub fn handle_action<T, F, S, C, Custom>(
         &mut self,
         model: &T,
-        filter: &F,
-        config: TreeFilterConfig,
-        action: TreeAction<C>,
-    ) -> TreeEvent<C>
+        query: &TreeQuery<F, S>,
+        columns: &C,
+        action: TreeAction<Custom>,
+    ) -> TreeEvent<Id, Custom>
     where
         T: TreeModel<Id = Id>,
         F: TreeFilter<T>,
+        S: TreeSort<T>,
+        C: TreeColumns<T>,
     {
-        self.ensure_visible_nodes_filtered(model, filter, config);
-        let mut rebuild_visible = |state: &mut Self, model: &T| {
-            state.ensure_visible_nodes_filtered(model, filter, config);
+        self.ensure_projection(model, query);
+        let event = match action {
+            TreeAction::View(action) => {
+                self.handle_view_action(model, columns.column_count(), action)
+            }
+            TreeAction::Edit(action) => self.handle_edit_intent(action),
+            TreeAction::Custom(custom) => TreeEvent::Intent(TreeIntent::Custom(custom)),
         };
-        self.handle_action_inner(model, action, &mut rebuild_visible)
+        if matches!(event, TreeEvent::Changed) {
+            self.ensure_projection(model, query);
+        }
+        event
     }
 
-    #[cfg(feature = "edit")]
-    /// Applies edit actions to a mutable model and updates state.
-    pub fn handle_edit_action<T: TreeEdit<Id = Id>, C>(
+    /// Applies a command through the model, reconciles persistent state, and rebuilds the projection.
+    ///
+    /// # Errors
+    ///
+    /// Returns the model-specific error from [`TreeEditor::apply`] without changing view state.
+    pub fn apply_edit<T, F, S>(
         &mut self,
         model: &mut T,
-        action: TreeAction<C>,
-        clipboard: &mut Option<Id>,
-    ) -> bool {
-        self.ensure_visible_nodes(model);
-        match action {
-            TreeAction::ReorderUp => self.reorder_selected(model, |model, parent, child| {
-                model.move_child_up(parent, child)
-            }),
-            TreeAction::ReorderDown => self.reorder_selected(model, |model, parent, child| {
-                model.move_child_down(parent, child)
-            }),
-            TreeAction::DetachNode => {
-                if let Some((node_id, parent_id)) = self.selected_node_with_parent() {
-                    if model.is_root(node_id) {
-                        return false;
-                    }
-                    model.remove_child(parent_id, node_id);
-                    self.prune_removed_marks(model);
-                    self.invalidate_all();
-                    return true;
-                }
-                false
+        query: &TreeQuery<F, S>,
+        command: TreeEditCommand<Id>,
+    ) -> Result<TreeChangeSet<Id>, T::Error>
+    where
+        T: TreeEditor<Id = Id>,
+        F: TreeFilter<T>,
+        S: TreeSort<T>,
+    {
+        let changes = model.apply(command)?;
+        self.reconcile_changes(&changes);
+        if let TreeSelectionUpdate::Select(id) = changes.selection {
+            self.expand_to(model, id);
+        }
+        self.ensure_projection(model, query);
+        Ok(changes)
+    }
+
+    /// Reconciles marks, expansion, and selection with an exact model change set.
+    pub fn reconcile_changes(&mut self, changes: &TreeChangeSet<Id>) {
+        self.expanded.retain(|path| {
+            !changes.removed.contains(&path.id)
+                && !path
+                    .parent
+                    .is_some_and(|parent| changes.removed.contains(&parent))
+                && !changes.moved.contains(&path.id)
+        });
+
+        self.manual_marked
+            .retain(|id| !changes.removed.contains(id));
+
+        match changes.selection {
+            TreeSelectionUpdate::Keep => {}
+            TreeSelectionUpdate::Select(id) => {
+                self.selected = Some(id);
+                self.selection_needs_visibility = true;
             }
-            TreeAction::DeleteNode => {
-                if let Some(node_id) = self.selected_id() {
-                    if model.is_root(node_id) {
-                        return false;
-                    }
-                    model.delete_node(node_id);
-                    self.prune_removed_marks(model);
-                    self.invalidate_all();
-                    return true;
-                }
-                false
+            TreeSelectionUpdate::Clear => {
+                self.selected = None;
+                self.selection_needs_visibility = false;
             }
-            TreeAction::YankNode => {
-                if let Some(node_id) = self.selected_id() {
-                    if model.is_root(node_id) {
-                        return false;
-                    }
-                    *clipboard = Some(node_id);
-                    return true;
-                }
-                false
-            }
-            TreeAction::PasteNode => {
-                if let Some(node_id) = *clipboard
-                    && let Some(parent_id) = self.selected_node().map(|node| node.id)
-                {
-                    model.add_child(parent_id, node_id);
-                    self.invalidate_all();
-                    return true;
-                }
-                false
-            }
-            TreeAction::ExpandAll => {
-                self.expand_all(model);
-                true
-            }
-            TreeAction::CollapseAll => {
-                self.collapse_all();
-                true
-            }
-            TreeAction::Custom(custom) => {
-                drop(custom);
-                false
-            }
-            _ => false,
         }
     }
 
-    #[cfg(feature = "edit")]
-    fn reorder_selected<T, M>(&mut self, model: &mut T, mut move_child: M) -> bool
-    where
-        T: TreeEdit<Id = Id>,
-        M: FnMut(&mut T, Id, Id) -> bool,
-    {
-        if let Some((node_id, parent_id)) = self.selected_node_with_parent()
-            && move_child(model, parent_id, node_id)
-        {
-            self.invalidate();
-            self.ensure_visible_nodes(model);
-            if let Some(idx) = self.visible_index_of(node_id) {
-                self.list_state.select(Some(idx));
-            }
-            return true;
-        }
-        false
-    }
-
-    #[cfg(feature = "keymap")]
-    /// Resolves a key event into an action and handles it.
-    pub fn handle_key<T: TreeModel<Id = Id>>(&mut self, model: &T, key: KeyEvent) -> TreeEvent<()> {
-        self.ensure_visible_nodes(model);
-        let Some(action) = self.keymap.resolve(key) else {
-            return TreeEvent::Unhandled;
-        };
-        let mut rebuild_visible = |state: &mut Self, model: &T| state.update_visible_nodes(model);
-        self.handle_action_inner(model, action, &mut rebuild_visible)
-    }
-
-    #[cfg(feature = "keymap")]
-    /// Resolves a key event with a custom mapping and handles it.
-    pub fn handle_key_with<T, C, F>(&mut self, model: &T, key: KeyEvent, custom: F) -> TreeEvent<C>
-    where
-        T: TreeModel<Id = Id>,
-        F: Fn(KeyEvent) -> Option<C>,
-    {
-        self.ensure_visible_nodes(model);
-        let Some(action) = self.keymap.resolve_with(key, custom) else {
-            return TreeEvent::Unhandled;
-        };
-        let mut rebuild_visible = |state: &mut Self, model: &T| state.update_visible_nodes(model);
-        self.handle_action_inner(model, action, &mut rebuild_visible)
-    }
-
-    #[cfg(feature = "keymap")]
-    /// Resolves a key event with filtering enabled and handles it.
-    pub fn handle_key_filtered<T, F>(
+    fn handle_view_action<T, C>(
         &mut self,
         model: &T,
-        filter: &F,
-        config: TreeFilterConfig,
+        column_count: usize,
+        action: TreeViewAction,
+    ) -> TreeEvent<Id, C>
+    where
+        T: TreeModel<Id = Id>,
+    {
+        let changed = match action {
+            TreeViewAction::SelectPrev => self.select_prev(),
+            TreeViewAction::SelectNext => self.select_next(),
+            TreeViewAction::SelectParent => self.select_parent(),
+            TreeViewAction::SelectFirstChild => self.select_first_child(),
+            TreeViewAction::Expand => {
+                return self.change_selected_expansion(ExpansionAction::Expand);
+            }
+            TreeViewAction::Collapse => self.collapse_selected(),
+            TreeViewAction::ExpandOrSelectFirstChild => {
+                return self.expand_or_select_first_child();
+            }
+            TreeViewAction::CollapseOrSelectParent => {
+                if self.collapse_selected() {
+                    true
+                } else {
+                    self.select_parent()
+                }
+            }
+            TreeViewAction::ToggleNode => {
+                return self.change_selected_expansion(ExpansionAction::Toggle);
+            }
+            TreeViewAction::ToggleRecursive => return self.toggle_selected_recursive(model),
+            TreeViewAction::ExpandAll => self.expand_all(model),
+            TreeViewAction::CollapseAll => self.collapse_all(),
+            TreeViewAction::ToggleGuides => {
+                self.draw_lines = !self.draw_lines;
+                true
+            }
+            TreeViewAction::ToggleMark => self
+                .selected
+                .is_some_and(|selected| self.toggle_marked(selected)),
+            TreeViewAction::SelectFirst => self.select_first(),
+            TreeViewAction::SelectLast => self.select_last(),
+            TreeViewAction::SelectColumnLeft => self.select_column_left(column_count),
+            TreeViewAction::SelectColumnRight => self.select_column_right(column_count),
+            TreeViewAction::SelectFirstColumn => {
+                self.select_column((column_count > 0).then_some(0), column_count)
+            }
+            TreeViewAction::SelectLastColumn => self.select_column(
+                (column_count > 0).then_some(column_count.saturating_sub(1)),
+                column_count,
+            ),
+            TreeViewAction::ScrollViewUp => self.scroll_view_by(-1),
+            TreeViewAction::ScrollViewDown => self.scroll_view_by(1),
+            TreeViewAction::ScrollLeft => self.scroll_horizontal_by(-1),
+            TreeViewAction::ScrollRight => self.scroll_horizontal_by(1),
+        };
+        changed_event(changed)
+    }
+
+    fn change_selected_expansion<C>(&mut self, action: ExpansionAction) -> TreeEvent<Id, C> {
+        let Some(node) = self.selected_node() else {
+            return TreeEvent::Unchanged;
+        };
+        match node.expansion() {
+            TreeExpansionState::Collapsed => {
+                self.set_expanded(node.id(), node.parent(), true);
+                TreeEvent::Changed
+            }
+            TreeExpansionState::Expanded if matches!(action, ExpansionAction::Toggle) => {
+                self.set_expanded(node.id(), node.parent(), false);
+                TreeEvent::Changed
+            }
+            TreeExpansionState::Unloaded => TreeEvent::Intent(TreeIntent::LoadChildren(node.id())),
+            TreeExpansionState::Leaf
+            | TreeExpansionState::Expanded
+            | TreeExpansionState::ForcedByFilter
+            | TreeExpansionState::Loading => TreeEvent::Unchanged,
+        }
+    }
+
+    fn collapse_selected(&mut self) -> bool {
+        let Some(node) = self.selected_node() else {
+            return false;
+        };
+        matches!(node.expansion(), TreeExpansionState::Expanded)
+            && self.set_expanded(node.id(), node.parent(), false)
+    }
+
+    fn expand_or_select_first_child<C>(&mut self) -> TreeEvent<Id, C> {
+        let event = self.change_selected_expansion(ExpansionAction::Expand);
+        match event {
+            TreeEvent::Unchanged => changed_event(self.select_first_child()),
+            TreeEvent::Changed | TreeEvent::Intent(_) => event,
+        }
+    }
+
+    fn toggle_selected_recursive<T, C>(&mut self, model: &T) -> TreeEvent<Id, C>
+    where
+        T: TreeModel<Id = Id>,
+    {
+        let Some(node) = self.selected_node() else {
+            return TreeEvent::Unchanged;
+        };
+        match node.expansion() {
+            TreeExpansionState::Collapsed | TreeExpansionState::Expanded => {
+                let expand = matches!(node.expansion(), TreeExpansionState::Collapsed);
+                changed_event(self.set_expanded_recursive(model, node.id(), node.parent(), expand))
+            }
+            TreeExpansionState::Unloaded => TreeEvent::Intent(TreeIntent::LoadChildren(node.id())),
+            TreeExpansionState::Leaf
+            | TreeExpansionState::ForcedByFilter
+            | TreeExpansionState::Loading => TreeEvent::Unchanged,
+        }
+    }
+
+    fn handle_edit_intent<C>(&self, action: TreeEditAction) -> TreeEvent<Id, C> {
+        let Some(node) = self.selected_node() else {
+            return TreeEvent::Unchanged;
+        };
+        let request = match action {
+            TreeEditAction::ReorderUp => {
+                let Some(parent) = node.parent() else {
+                    return TreeEvent::Unchanged;
+                };
+                TreeEditRequest::ReorderUp {
+                    node: node.id(),
+                    parent,
+                }
+            }
+            TreeEditAction::ReorderDown => {
+                let Some(parent) = node.parent() else {
+                    return TreeEvent::Unchanged;
+                };
+                TreeEditRequest::ReorderDown {
+                    node: node.id(),
+                    parent,
+                }
+            }
+            TreeEditAction::AddChild => TreeEditRequest::AddChild { parent: node.id() },
+            TreeEditAction::Rename => TreeEditRequest::Rename { node: node.id() },
+            TreeEditAction::Detach => {
+                let Some(parent) = node.parent() else {
+                    return TreeEvent::Unchanged;
+                };
+                TreeEditRequest::Detach {
+                    node: node.id(),
+                    parent,
+                }
+            }
+            TreeEditAction::Delete => TreeEditRequest::Delete { node: node.id() },
+            TreeEditAction::Yank => TreeEditRequest::Yank { node: node.id() },
+            TreeEditAction::Paste => TreeEditRequest::Paste { parent: node.id() },
+        };
+        TreeEvent::Intent(TreeIntent::Edit(request))
+    }
+
+    #[cfg(feature = "keymap")]
+    /// Resolves a crossterm event into an action and handles it.
+    pub fn handle_key<T, F, S, C>(
+        &mut self,
+        model: &T,
+        query: &TreeQuery<F, S>,
+        columns: &C,
         key: KeyEvent,
-    ) -> TreeEvent<()>
+    ) -> TreeEvent<Id>
     where
         T: TreeModel<Id = Id>,
         F: TreeFilter<T>,
+        S: TreeSort<T>,
+        C: TreeColumns<T>,
     {
-        self.ensure_visible_nodes_filtered(model, filter, config);
-        let Some(action) = self.keymap.resolve(key) else {
-            return TreeEvent::Unhandled;
-        };
-        let mut rebuild_visible = |state: &mut Self, model: &T| {
-            state.ensure_visible_nodes_filtered(model, filter, config);
-        };
-        self.handle_action_inner(model, action, &mut rebuild_visible)
+        self.handle_key_with(model, query, columns, key, |_| None::<()>)
     }
 
     #[cfg(feature = "keymap")]
-    /// Resolves a key event with filtering and custom mapping enabled and handles it.
-    pub fn handle_key_filtered_with<T, F, C, R>(
+    /// A version of [`handle_key`](Self::handle_key) with custom mapping.
+    pub fn handle_key_with<T, F, S, C, Custom, R>(
         &mut self,
         model: &T,
-        filter: &F,
-        config: TreeFilterConfig,
+        query: &TreeQuery<F, S>,
+        columns: &C,
         key: KeyEvent,
         custom: R,
-    ) -> TreeEvent<C>
+    ) -> TreeEvent<Id, Custom>
     where
         T: TreeModel<Id = Id>,
         F: TreeFilter<T>,
-        R: Fn(KeyEvent) -> Option<C>,
+        S: TreeSort<T>,
+        C: TreeColumns<T>,
+        R: Fn(KeyEvent) -> Option<Custom>,
     {
-        self.ensure_visible_nodes_filtered(model, filter, config);
         let Some(action) = self.keymap.resolve_with(key, custom) else {
-            return TreeEvent::Unhandled;
+            return TreeEvent::Unchanged;
         };
-        let mut rebuild_visible = |state: &mut Self, model: &T| {
-            state.ensure_visible_nodes_filtered(model, filter, config);
-        };
-        self.handle_action_inner(model, action, &mut rebuild_visible)
-    }
-
-    fn handle_action_inner<T, C, R>(
-        &mut self,
-        model: &T,
-        action: TreeAction<C>,
-        rebuild_visible: &mut R,
-    ) -> TreeEvent<C>
-    where
-        T: TreeModel<Id = Id>,
-        R: FnMut(&mut Self, &T),
-    {
-        if matches!(&action, TreeAction::Custom(_)) {
-            return TreeEvent::Action(action);
-        }
-
-        match &action {
-            TreeAction::ExpandAll => {
-                self.expand_all(model);
-                return TreeEvent::Handled;
-            }
-            TreeAction::CollapseAll => {
-                self.collapse_all();
-                return TreeEvent::Handled;
-            }
-            TreeAction::ToggleGuides => {
-                self.draw_lines = !self.draw_lines;
-                return TreeEvent::Handled;
-            }
-            _ => {}
-        }
-
-        if self.visible_nodes.is_empty() {
-            return TreeEvent::Unhandled;
-        }
-
-        match action {
-            TreeAction::SelectPrev => {
-                self.select_prev();
-                TreeEvent::Handled
-            }
-            TreeAction::SelectNext => {
-                self.select_next();
-                TreeEvent::Handled
-            }
-            TreeAction::SelectParent => {
-                self.select_parent();
-                TreeEvent::Handled
-            }
-            TreeAction::SelectChild => {
-                self.select_child_with_descendants(model, rebuild_visible);
-                TreeEvent::Handled
-            }
-            TreeAction::ToggleRecursive => {
-                if let Some(node) = self.selected_node()
-                    && node.has_children
-                {
-                    let should_expand = !self.is_expanded(node.parent, node.id);
-                    self.set_expanded_recursive(model, node.id, node.parent, should_expand);
-                    self.dirty = true;
-                    return TreeEvent::Handled;
-                }
-                TreeEvent::Unhandled
-            }
-            TreeAction::ToggleNode => {
-                if let Some(node) = self.selected_node()
-                    && node.has_children
-                {
-                    self.toggle(node.id, node.parent);
-                    return TreeEvent::Handled;
-                }
-                TreeEvent::Unhandled
-            }
-            TreeAction::ToggleMark => {
-                if let Some(node_id) = self.selected_id() {
-                    self.toggle_node_mark(node_id);
-                    return TreeEvent::Handled;
-                }
-                TreeEvent::Unhandled
-            }
-            TreeAction::SelectFirst => {
-                self.select_first();
-                TreeEvent::Handled
-            }
-            TreeAction::SelectLast => {
-                self.select_last();
-                TreeEvent::Handled
-            }
-            TreeAction::ExpandAll | TreeAction::CollapseAll | TreeAction::ToggleGuides => {
-                TreeEvent::Handled
-            }
-            TreeAction::ReorderUp
-            | TreeAction::ReorderDown
-            | TreeAction::AddChild
-            | TreeAction::EditNode
-            | TreeAction::DetachNode
-            | TreeAction::DeleteNode
-            | TreeAction::YankNode
-            | TreeAction::PasteNode
-            | TreeAction::Custom(_) => TreeEvent::Action(action),
-        }
+        self.handle_action(model, query, columns, action)
     }
 }
+const fn changed_event<Id, Custom>(changed: bool) -> TreeEvent<Id, Custom> {
+    if changed {
+        TreeEvent::Changed
+    } else {
+        TreeEvent::Unchanged
+    }
+}
+

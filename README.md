@@ -4,50 +4,43 @@
 [![crates.io](https://img.shields.io/crates/v/tui-treelistview.svg)](https://crates.io/crates/tui-treelistview)
 [![docs.rs](https://docs.rs/tui-treelistview/badge.svg)](https://docs.rs/tui-treelistview)
 
-A tree-list widget for Ratatui.
+A tree-list widget for [Ratatui](https://ratatui.rs/).
 
-Specialization: this widget is less about passive tree rendering and more about full interaction with tree data (navigate, toggle, reorder, add, rename, delete), so it fits editing workflows as much as browsing.
+The widget focuses on interaction with tree data: browsing, navigation, filtering, sorting, marks,
+and editing workflows rather than passive rendering alone.
 
 ![demo](img/demo.gif)
 
-> IMPORTANT: This widget is the open part of a closed-source project, so highly specialized features may be.
+> This widget is the open part of a closed-source project, so some features may be highly
+> specialized.
 
 ## How it works
 
-The widget is split into three layers:
+The widget is split into four layers:
 
-- Data: `TreeModel` is the minimal tree contract (root, children, contains). Your app owns the data.
-- State: `TreeListViewState` stores expanded nodes, selection, scroll offset, and caches of visible nodes/marks.
-- View: `TreeListView` builds rows from the current state and renders a `ratatui::widgets::Table`.
+- `TreeModel` provides roots, child states, and a data revision. Your application owns the data.
+- `TreeQuery` describes filtering, sorting, root visibility, and selection fallback.
+- `TreeListViewState` stores selection, expanded nodes, marks, scroll positions, and caches.
+- `TreeListView` renders the current projection as a Ratatui table.
 
-Rendering flow in one sentence: state builds a flat list of visible nodes, the view turns them into table rows using your label renderer + columns, and Ratatui draws the table (with optional scrollbar).
+Typical usage:
 
-Practical usage pattern:
+1. Implement `TreeModel` for your data.
+2. Provide a label renderer and a `TreeColumnSet`.
+3. Keep `TreeListViewState` in the application state.
+4. Handle actions or keys and render `TreeListView` each frame.
 
-1) Implement `TreeModel` for your data.
-2) Provide a label renderer (`TreeLabelRenderer` or `TreeLabelProvider`) and columns (`TreeColumns`).
-3) Keep a `TreeListViewState` in your app state, mutate it on input (`handle_action`/`handle_key`), and render `TreeListView` each frame.
-4) (Optional) Enable filtering (`with_filter` + `TreeFilterConfig`), editing actions (`edit` feature), and keymaps (`keymap` feature).
+`TreeModel` assumes a real forest: IDs are stable and unique, nodes have one parent, cycles are not
+allowed, and `revision()` changes after relevant model updates.
 
-Filtering config is type-driven:
+## Features
 
-- `TreeFilterConfig::Disabled`
-- `TreeFilterConfig::Enabled { auto_expand: true }`
-- `TreeFilterConfig::Enabled { auto_expand: false }`
-
-### TreeModel contract
-
-`TreeModel` is intentionally minimal, but it assumes a real tree:
-
-- No cycles (depth-first traversal is used).
-- Each node has a single parent (no shared nodes / DAG).
-- `Id` is stable across frames so expansion/selection works.
-- `children(id)` returns a deterministic slice for the lifetime of the model reference.
-- `contains(id)` matches your model storage (used for pruning marks).
-- Very deep trees can exhaust the call stack because some traversals are recursive.
-
-If your model or filter changes outside tree-list actions, call `TreeListViewState::invalidate()`
-before rendering or handling input. Use `invalidate_all()` when mark state may also be affected.
+- Generic stable node IDs and multiple roots.
+- Lazy `Unloaded` and `Loading` child states.
+- Filtering, sibling sorting, and stable-ID selection.
+- Dynamic columns, horizontal scrolling, and viewport row virtualization.
+- Typed view/edit actions, marks, snapshots, and hit testing.
+- Iterative traversal for very deep trees.
 
 ## Usage
 
@@ -55,51 +48,28 @@ Add the crate from crates.io:
 
 ```toml
 [dependencies]
-tui-treelistview = { version = "x.y.z", default-features = false } # replace with latest
+tui-treelistview = "0.2"
 ```
 
-Or pull directly from GitHub (e.g. for unreleased changes):
+Optional features:
 
-```toml
-[dependencies]
-tui-treelistview = { git = "https://github.com/hexqnt/tui-treelistview", default-features = false }
-```
+- `keymap` — Crossterm key bindings.
+- `serde` — serialization of `TreeListViewSnapshot`.
 
-See `examples/` for working snippets.
+The crate does not select a Ratatui backend. Editing types are always available.
 
 ## Examples
 
-Most examples render into an in-memory buffer and exit immediately.
-Use `demo` for an interactive terminal UI (edits are in-memory only).
-
-Run from the workspace root:
+Most examples render into an in-memory buffer and exit immediately. The demo is interactive and
+keeps edits in memory.
 
 ```bash
-cargo run  --example minimal
+cargo run --example minimal
+cargo run --example edit_actions
+cargo run --example custom_keymap --features keymap
+cargo run --example demo --features keymap -- ./ 3
 ```
 
-Examples that require features:
-
-```bash
-cargo run  --example custom_keymap --features keymap
-cargo run  --example edit_actions --features edit
-```
-
-Interactive demo (path + depth):
-
-```bash
-cargo run --example demo --features keymap,edit -- ./ 3
-```
-
-Keys: arrows/hjkl navigate, Enter toggle, E expand all, C collapse all, Shift+Up/Down reorder, Del/d detach, Shift+Del or D delete, y/p move, a add, e rename, q/Esc quit.
-
-## Path to Release
-
-- Different node identifier types.
-- Move a node up one nesting level.
-- Insert a node in the correct position.
-- Insert multiple nodes at once.
-- Horizontal scrolling.
-- Columns before the main column.
-- Free cursor movement between columns.
-- Prebuilt mappings for popular tree storage structures.
+Demo keys: arrows or `hjkl` navigate, Enter toggles, `E`/`C` expand or collapse all,
+Shift+Up/Down reorder, `a` adds, `e` renames, `d` detaches, `D` deletes, `y`/`p` yank and paste,
+Tab changes columns, Ctrl+Left/Right scrolls horizontally, and `q`/Esc exits.

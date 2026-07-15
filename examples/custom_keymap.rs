@@ -1,112 +1,88 @@
-// Custom keymap example: map keys to TreeAction manually and call handle_action.
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
-use ratatui::layout::{Constraint, Rect};
+use ratatui::layout::Rect;
 use ratatui::prelude::Buffer;
-use ratatui::widgets::{Cell, StatefulWidget};
+use ratatui::widgets::StatefulWidget;
 
 use tui_treelistview::{
-    SimpleColumns, TreeAction, TreeGlyphs, TreeLabelRenderer, TreeListView, TreeListViewState,
-    TreeListViewStyle, TreeModel, TreeRowContext,
+    ColumnDef, ColumnWidth, TreeAction, TreeChildren, TreeColumnSet, TreeLabelPrefix,
+    TreeLabelProvider, TreeListView, TreeListViewState, TreeListViewStyle, TreeModel, TreeQuery,
+    TreeRevision, TreeViewAction,
 };
 
-// Minimal model: root with three children and string labels.
 struct Model {
     children: Vec<Vec<usize>>,
     names: Vec<String>,
 }
 
-impl Model {
-    // Build a small fixed tree.
-    fn new() -> Self {
-        Self {
-            children: vec![vec![1, 2, 3], vec![], vec![], vec![]],
-            names: vec![
-                "root".to_string(),
-                "alpha".to_string(),
-                "beta".to_string(),
-                "gamma".to_string(),
-            ],
-        }
-    }
-}
-
-// Standard TreeModel implementation used by the widget.
 impl TreeModel for Model {
     type Id = usize;
 
-    fn root(&self) -> Option<Self::Id> {
-        Some(0)
+    fn roots(&self) -> impl Iterator<Item = Self::Id> + '_ {
+        std::iter::once(0)
     }
 
-    fn children(&self, id: Self::Id) -> &[Self::Id] {
-        &self.children[id]
+    fn children(&self, id: Self::Id) -> TreeChildren<'_, Self::Id> {
+        TreeChildren::loaded(&self.children[id])
     }
 
-    fn contains(&self, id: Self::Id) -> bool {
-        id < self.children.len()
+    fn revision(&self) -> TreeRevision {
+        TreeRevision::INITIAL
     }
 }
 
-// Label renderer maps an id to a cell.
 struct Label;
 
-impl TreeLabelRenderer<Model> for Label {
-    fn cell<'a>(
-        &'a self,
-        model: &'a Model,
-        id: usize,
-        _ctx: &TreeRowContext,
-        _glyphs: &TreeGlyphs<'a>,
-    ) -> Cell<'a> {
-        Cell::from(model.names[id].as_str())
+impl TreeLabelProvider<Model> for Label {
+    fn label_parts<'a>(&'a self, model: &'a Model, id: usize) -> TreeLabelPrefix<'a> {
+        TreeLabelPrefix::borrowed(&model.names[id])
     }
 }
 
-// Custom keymap: WASD + a few extra actions.
 const fn map_key(event: KeyEvent) -> Option<TreeAction> {
-    match (event.code, event.modifiers) {
-        (KeyCode::Char('w'), KeyModifiers::NONE) => Some(TreeAction::SelectPrev),
-        (KeyCode::Char('s'), KeyModifiers::NONE) => Some(TreeAction::SelectNext),
-        (KeyCode::Char('a'), KeyModifiers::NONE) => Some(TreeAction::SelectParent),
-        (KeyCode::Char('d'), KeyModifiers::NONE) => Some(TreeAction::SelectChild),
-        (KeyCode::Char('x'), KeyModifiers::NONE) => Some(TreeAction::ToggleNode),
-        (KeyCode::Char('m'), KeyModifiers::NONE) => Some(TreeAction::ToggleMark),
-        (KeyCode::Char('g'), KeyModifiers::NONE) => Some(TreeAction::ToggleGuides),
-        _ => None,
-    }
+    let action = match (event.code, event.modifiers) {
+        (KeyCode::Char('w'), KeyModifiers::NONE) => TreeViewAction::SelectPrev,
+        (KeyCode::Char('s'), KeyModifiers::NONE) => TreeViewAction::SelectNext,
+        (KeyCode::Char('a'), KeyModifiers::NONE) => TreeViewAction::CollapseOrSelectParent,
+        (KeyCode::Char('d'), KeyModifiers::NONE) => TreeViewAction::ExpandOrSelectFirstChild,
+        (KeyCode::Char('x'), KeyModifiers::NONE) => TreeViewAction::ToggleNode,
+        (KeyCode::Char('m'), KeyModifiers::NONE) => TreeViewAction::ToggleMark,
+        _ => return None,
+    };
+    Some(TreeAction::View(action))
 }
 
 fn main() {
-    // Build model + render helpers.
-    let model = Model::new();
+    let model = Model {
+        children: vec![vec![1, 2, 3], vec![], vec![], vec![]],
+        names: vec!["root".into(), "alpha".into(), "beta".into(), "gamma".into()],
+    };
+    let query = TreeQuery::new();
     let label = Label;
-    // Single-column layout with no header.
-    let columns =
-        SimpleColumns::<0, Model>::new(Constraint::Percentage(100), "", []).without_header();
-
-    // State stores expansion/selection for the widget.
+    let columns = TreeColumnSet::new([ColumnDef::tree(
+        "Name",
+        ColumnWidth::flexible(8, 24).expect("valid static column width"),
+    )])
+    .expect("one tree column");
     let mut state = TreeListViewState::new();
     state.set_expanded(0, None, true);
 
-    // Use defaults for styling; input mapping happens outside the widget.
-    let style = TreeListViewStyle::default();
-    let widget = TreeListView::new(&model, &label, &columns, style);
-
-    // Simulate a few key presses and apply actions manually.
-    let mut buffer = Buffer::empty(Rect::new(0, 0, 40, 8));
-
-    let demo_keys = [
+    for key in [
         KeyEvent::new(KeyCode::Char('s'), KeyModifiers::NONE),
         KeyEvent::new(KeyCode::Char('s'), KeyModifiers::NONE),
-        KeyEvent::new(KeyCode::Char('x'), KeyModifiers::NONE),
-    ];
-
-    for key in demo_keys {
+    ] {
         if let Some(action) = map_key(key) {
-            state.handle_action(&model, action);
+            let _ = state.handle_action(&model, &query, &columns, action);
         }
     }
 
-    // Render into a buffer for the example.
-    widget.render(Rect::new(0, 0, 40, 8), &mut buffer, &mut state);
+    let area = Rect::new(0, 0, 40, 8);
+    let mut buffer = Buffer::empty(area);
+    TreeListView::new(
+        &model,
+        &query,
+        &label,
+        &columns,
+        TreeListViewStyle::default(),
+    )
+    .render(area, &mut buffer, &mut state);
 }

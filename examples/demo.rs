@@ -6,15 +6,17 @@ use std::time::Duration;
 
 use chrono::{DateTime, Local};
 use crossterm::event::{self, Event, KeyCode, KeyEventKind};
-use ratatui::layout::Constraint;
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::Line;
 use ratatui::widgets::Cell;
 use ratatui::{DefaultTerminal, Frame};
+use smallvec::smallvec;
 
 use tui_treelistview::{
-    ColumnDef, SimpleColumns, TreeAction, TreeEdit, TreeEvent, TreeLabelPrefix, TreeLabelProvider,
-    TreeListView, TreeListViewState, TreeListViewStyle, TreeModel,
+    ColumnDef, ColumnWidth, TreeChangeSet, TreeChildren, TreeColumnSet, TreeEditCommand,
+    TreeEditRequest, TreeEditor, TreeEvent, TreeInsertPosition, TreeIntent, TreeLabelPrefix,
+    TreeLabelProvider, TreeListView, TreeListViewState, TreeListViewStyle, TreeModel, TreeQuery,
+    TreeRevision, TreeRowContext, TreeSelectionUpdate,
 };
 
 struct Node {
@@ -24,11 +26,13 @@ struct Node {
     size: String,
     perms: String,
     modified: String,
+    alive: bool,
 }
 
 struct FsModel {
     nodes: Vec<Node>,
     root: Option<usize>,
+    revision: TreeRevision,
 }
 
 impl FsModel {
@@ -36,6 +40,7 @@ impl FsModel {
         Self {
             nodes: Vec::new(),
             root: None,
+            revision: TreeRevision::INITIAL,
         }
     }
 
@@ -58,19 +63,29 @@ impl FsModel {
             size: "-".to_string(),
             perms: placeholder_permissions(false),
             modified: now_string(),
+            alive: true,
         };
         self.nodes.push(node);
         self.nodes[parent].children.push(id);
         Some(id)
     }
 
-    fn rename_node(&mut self, id: usize) {
+    fn rename_node(&mut self, id: usize) -> bool {
         if let Some(node) = self.nodes.get_mut(id) {
             if !node.name.ends_with(" [edited]") {
                 node.name.push_str(" [edited]");
             }
             node.modified = now_string();
+            return true;
         }
+        false
+    }
+
+    fn detach_from_parent(&mut self, id: usize) -> Option<usize> {
+        let parent = self.nodes.get(id)?.parent?;
+        self.nodes[parent].children.retain(|child| *child != id);
+        self.nodes[id].parent = None;
+        Some(parent)
     }
 
     fn is_descendant(&self, root: usize, target: usize) -> bool {
@@ -98,16 +113,22 @@ impl FsModel {
 impl TreeModel for FsModel {
     type Id = usize;
 
-    fn root(&self) -> Option<Self::Id> {
+    fn roots(&self) -> impl Iterator<Item = Self::Id> + '_ {
         self.root
+            .filter(|root| self.nodes.get(*root).is_some_and(|node| node.alive))
+            .into_iter()
     }
 
-    fn children(&self, id: Self::Id) -> &[Self::Id] {
-        &self.nodes[id].children
+    fn children(&self, id: Self::Id) -> TreeChildren<'_, Self::Id> {
+        if self.nodes[id].alive {
+            TreeChildren::loaded(&self.nodes[id].children)
+        } else {
+            TreeChildren::Leaf
+        }
     }
 
-    fn contains(&self, id: Self::Id) -> bool {
-        id < self.nodes.len()
+    fn revision(&self) -> TreeRevision {
+        self.revision
     }
 
     fn size_hint(&self) -> usize {
@@ -115,88 +136,84 @@ impl TreeModel for FsModel {
     }
 }
 
-impl TreeEdit for FsModel {
-    fn is_root(&self, id: Self::Id) -> bool {
-        self.root == Some(id)
-    }
+impl TreeEditor for FsModel {
+    type Error = &'static str;
 
-    fn move_child_up(&mut self, parent: Self::Id, child: Self::Id) -> bool {
-        let children = &mut self.nodes[parent].children;
-        if let Some(idx) = children.iter().position(|&id| id == child) {
-            if idx == 0 {
-                return false;
+    fn apply(
+        &mut self,
+        command: TreeEditCommand<Self::Id>,
+    ) -> Result<TreeChangeSet<Self::Id>, Self::Error> {
+        let mut changes = TreeChangeSet::default();
+        match command {
+            TreeEditCommand::CreateChild { parent } => {
+                let child = self.add_synthetic_child(parent).ok_or("invalid parent")?;
+                changes.inserted.push(child);
+                changes.selection = TreeSelectionUpdate::Select(child);
             }
-            children.swap(idx, idx - 1);
-            return true;
-        }
-        false
-    }
-
-    fn move_child_down(&mut self, parent: Self::Id, child: Self::Id) -> bool {
-        let children = &mut self.nodes[parent].children;
-        if let Some(idx) = children.iter().position(|&id| id == child) {
-            if idx + 1 >= children.len() {
-                return false;
+            TreeEditCommand::Rename { node } => {
+                if !self.rename_node(node) {
+                    return Err("invalid node");
+                }
+                changes.selection = TreeSelectionUpdate::Select(node);
             }
-            children.swap(idx, idx + 1);
-            return true;
-        }
-        false
-    }
-
-    fn remove_child(&mut self, parent: Self::Id, child: Self::Id) {
-        if parent >= self.nodes.len() {
-            return;
-        }
-        self.nodes[parent].children.retain(|&id| id != child);
-        if let Some(node) = self.nodes.get_mut(child) {
-            node.parent = None;
-        }
-    }
-
-    fn delete_node(&mut self, id: Self::Id) {
-        if id >= self.nodes.len() {
-            return;
-        }
-
-        if self.root == Some(id) {
-            self.root = None;
-        }
-
-        if let Some(parent) = self.nodes[id].parent
-            && let Some(node) = self.nodes.get_mut(parent)
-        {
-            node.children.retain(|&child_id| child_id != id);
-        }
-
-        let children = self.nodes[id].children.clone();
-        for child in children {
-            if let Some(node) = self.nodes.get_mut(child) {
-                node.parent = None;
+            TreeEditCommand::Move {
+                nodes,
+                parent,
+                position,
+            } => {
+                if parent >= self.nodes.len() || !self.nodes[parent].alive {
+                    return Err("invalid destination parent");
+                }
+                for node in nodes.iter().copied() {
+                    if self.root == Some(node) || self.is_descendant(node, parent) {
+                        return Err("move would violate tree invariants");
+                    }
+                }
+                for node in nodes.iter().copied() {
+                    self.detach_from_parent(node);
+                }
+                let index = position
+                    .index_in(&self.nodes[parent].children)
+                    .ok_or("insertion anchor is missing")?;
+                for (offset, node) in nodes.iter().copied().enumerate() {
+                    self.nodes[parent].children.insert(index + offset, node);
+                    self.nodes[node].parent = Some(parent);
+                    changes.moved.push(node);
+                }
+                changes.selection = nodes
+                    .last()
+                    .copied()
+                    .map_or(TreeSelectionUpdate::Keep, TreeSelectionUpdate::Select);
+            }
+            TreeEditCommand::Detach { nodes } => {
+                for node in nodes {
+                    if self.root == Some(node) {
+                        return Err("cannot detach root");
+                    }
+                    if self.detach_from_parent(node).is_some() {
+                        changes.moved.push(node);
+                    }
+                }
+            }
+            TreeEditCommand::Delete { nodes } => {
+                for node in nodes {
+                    if self.root == Some(node) {
+                        return Err("cannot delete root");
+                    }
+                    self.detach_from_parent(node);
+                    let mut stack = vec![node];
+                    while let Some(id) = stack.pop() {
+                        stack.extend(self.nodes[id].children.iter().copied());
+                        self.nodes[id].alive = false;
+                        self.nodes[id].parent = None;
+                        self.nodes[id].children.clear();
+                        changes.removed.push(id);
+                    }
+                }
             }
         }
-
-        self.nodes[id].children.clear();
-        self.nodes[id].parent = None;
-    }
-
-    fn add_child(&mut self, parent: Self::Id, child: Self::Id) {
-        if parent >= self.nodes.len() || child >= self.nodes.len() {
-            return;
-        }
-        if self.is_descendant(child, parent) {
-            return;
-        }
-        if let Some(old_parent) = self.nodes[child].parent
-            && let Some(node) = self.nodes.get_mut(old_parent)
-        {
-            node.children.retain(|&id| id != child);
-        }
-        self.nodes[child].parent = Some(parent);
-        let children = &mut self.nodes[parent].children;
-        if !children.contains(&child) {
-            children.push(child);
-        }
+        self.revision.advance();
+        Ok(changes)
     }
 }
 
@@ -204,10 +221,7 @@ struct Label;
 
 impl TreeLabelProvider<FsModel> for Label {
     fn label_parts<'a>(&'a self, model: &'a FsModel, id: usize) -> TreeLabelPrefix<'a> {
-        TreeLabelPrefix {
-            name: model.nodes[id].name.as_str(),
-            prefix: None,
-        }
+        TreeLabelPrefix::borrowed(&model.nodes[id].name)
     }
 }
 
@@ -267,15 +281,15 @@ struct EntryInfo {
     is_dir: bool,
 }
 
-fn size_cell(model: &FsModel, id: usize) -> Cell<'_> {
+fn size_cell<'a>(model: &'a FsModel, id: usize, _: &TreeRowContext<'_>) -> Cell<'a> {
     Cell::from(model.nodes[id].size.as_str())
 }
 
-fn perms_cell(model: &FsModel, id: usize) -> Cell<'_> {
+fn perms_cell<'a>(model: &'a FsModel, id: usize, _: &TreeRowContext<'_>) -> Cell<'a> {
     Cell::from(model.nodes[id].perms.as_str())
 }
 
-fn modified_cell(model: &FsModel, id: usize) -> Cell<'_> {
+fn modified_cell<'a>(model: &'a FsModel, id: usize, _: &TreeRowContext<'_>) -> Cell<'a> {
     Cell::from(model.nodes[id].modified.as_str())
 }
 
@@ -357,6 +371,7 @@ fn node_from_meta(name: String, parent: Option<usize>, metadata: &fs::Metadata) 
         },
         perms: format_permissions(metadata),
         modified: format_modified(metadata),
+        alive: true,
     }
 }
 
@@ -432,78 +447,102 @@ fn placeholder_permissions(is_dir: bool) -> String {
 }
 
 fn expand_all(state: &mut TreeListViewState<usize>, model: &FsModel) {
-    for (id, node) in model.nodes.iter().enumerate() {
-        if !node.children.is_empty() {
-            state.set_expanded(id, node.parent, true);
-        }
-    }
+    let _ = state.expand_all(model);
 }
 
 fn render(
     frame: &mut Frame,
     model: &FsModel,
+    query: &TreeQuery,
     label: &Label,
-    columns: &SimpleColumns<3, FsModel>,
+    columns: &TreeColumnSet<'_, FsModel>,
     state: &mut TreeListViewState<usize>,
     style: &TreeListViewStyle<'_>,
 ) {
-    let widget = TreeListView::new(model, label, columns, style.clone());
+    let widget = TreeListView::new(model, query, label, columns, style.clone());
     frame.render_stateful_widget(widget, frame.area(), state);
+}
+
+fn edit_command(
+    model: &FsModel,
+    request: TreeEditRequest<usize>,
+    clipboard: &mut Option<usize>,
+) -> Option<TreeEditCommand<usize>> {
+    match request {
+        TreeEditRequest::ReorderUp { node, parent } => {
+            let siblings = &model.nodes[parent].children;
+            let index = siblings.iter().position(|id| *id == node)?;
+            let previous = index.checked_sub(1).and_then(|index| siblings.get(index))?;
+            Some(TreeEditCommand::Move {
+                nodes: smallvec![node],
+                parent,
+                position: TreeInsertPosition::Before(*previous),
+            })
+        }
+        TreeEditRequest::ReorderDown { node, parent } => {
+            let siblings = &model.nodes[parent].children;
+            let index = siblings.iter().position(|id| *id == node)?;
+            let next = siblings.get(index + 1)?;
+            Some(TreeEditCommand::Move {
+                nodes: smallvec![node],
+                parent,
+                position: TreeInsertPosition::After(*next),
+            })
+        }
+        TreeEditRequest::AddChild { parent } => Some(TreeEditCommand::CreateChild { parent }),
+        TreeEditRequest::Rename { node } => Some(TreeEditCommand::Rename { node }),
+        TreeEditRequest::Detach { node, .. } => Some(TreeEditCommand::Detach {
+            nodes: smallvec![node],
+        }),
+        TreeEditRequest::Delete { node } => Some(TreeEditCommand::Delete {
+            nodes: smallvec![node],
+        }),
+        TreeEditRequest::Yank { node } => {
+            *clipboard = Some(node);
+            None
+        }
+        TreeEditRequest::Paste { parent } => {
+            let node = clipboard.filter(|node| model.nodes[*node].alive)?;
+            Some(TreeEditCommand::Move {
+                nodes: smallvec![node],
+                parent,
+                position: TreeInsertPosition::Last,
+            })
+        }
+    }
 }
 
 fn run_app(
     mut terminal: DefaultTerminal,
     mut model: FsModel,
-    columns: &SimpleColumns<3, FsModel>,
+    columns: &TreeColumnSet<'_, FsModel>,
     style: &TreeListViewStyle<'_>,
 ) -> io::Result<()> {
+    let query = TreeQuery::new();
     let label = Label;
     let mut state = TreeListViewState::with_capacity(model.size_hint());
     let mut clipboard: Option<usize> = None;
     expand_all(&mut state, &model);
-    if let Some(root_id) = model.root() {
-        state.select_by_id(&model, root_id);
+    if let Some(root_id) = model.roots().next() {
+        let _ = state.select_by_id(&model, &query, root_id);
     }
 
     loop {
-        terminal.draw(|frame| render(frame, &model, &label, columns, &mut state, style))?;
+        terminal.draw(|frame| {
+            render(frame, &model, &query, &label, columns, &mut state, style);
+        })?;
 
         if event::poll(Duration::from_millis(200))? {
             match event::read()? {
                 Event::Key(key) if key.kind == KeyEventKind::Press => match key.code {
                     KeyCode::Char('q') | KeyCode::Esc => break,
                     _ => {
-                        let event = state.handle_key(&model, key);
-                        if let TreeEvent::Action(action) = event {
-                            match action {
-                                TreeAction::AddChild => {
-                                    if let Some(parent_id) = state.selected_id()
-                                        && let Some(new_id) = model.add_synthetic_child(parent_id)
-                                    {
-                                        state.invalidate_all();
-                                        let _ = state.select_by_id(&model, new_id);
-                                    }
-                                }
-                                TreeAction::EditNode => {
-                                    if let Some(id) = state.selected_id() {
-                                        model.rename_node(id);
-                                        state.invalidate_all();
-                                    }
-                                }
-                                TreeAction::ReorderUp
-                                | TreeAction::ReorderDown
-                                | TreeAction::DeleteNode
-                                | TreeAction::DetachNode
-                                | TreeAction::YankNode
-                                | TreeAction::PasteNode => {
-                                    let _ = state.handle_edit_action(
-                                        &mut model,
-                                        action,
-                                        &mut clipboard,
-                                    );
-                                }
-                                _ => {}
-                            }
+                        let event = state.handle_key(&model, &query, columns, key);
+                        if let TreeEvent::Intent(TreeIntent::Edit(request)) = event
+                            && let Some(command) = edit_command(&model, request, &mut clipboard)
+                            && let Err(error) = state.apply_edit(&mut model, &query, command)
+                        {
+                            eprintln!("Edit failed: {error}");
                         }
                     }
                 },
@@ -524,15 +563,16 @@ fn main() -> io::Result<()> {
 
     let model = build_model(&args.root, args.max_depth)?;
 
-    let columns = SimpleColumns::new(
-        Constraint::Fill(1),
-        "Name",
-        [
-            ColumnDef::new("Size", Constraint::Length(10), size_cell),
-            ColumnDef::new("Perms", Constraint::Length(10), perms_cell),
-            ColumnDef::new("Modified", Constraint::Length(19), modified_cell),
-        ],
-    )
+    let columns = TreeColumnSet::new([
+        ColumnDef::tree(
+            "Name",
+            ColumnWidth::flexible(16, 48).expect("valid static column width"),
+        ),
+        ColumnDef::data("Size", ColumnWidth::fixed(10), size_cell),
+        ColumnDef::data("Perms", ColumnWidth::fixed(10), perms_cell),
+        ColumnDef::data("Modified", ColumnWidth::fixed(19), modified_cell),
+    ])
+    .expect("exactly one tree column")
     .header_style(
         Style::default()
             .fg(Color::Rgb(229, 201, 133))
@@ -553,7 +593,7 @@ fn main() -> io::Result<()> {
             .fg(Color::Rgb(255, 255, 255))
             .bg(Color::Rgb(52, 66, 96))
             .add_modifier(Modifier::BOLD),
-        mark_style: Style::default()
+        marked_style: Style::default()
             .fg(Color::Rgb(136, 192, 208))
             .add_modifier(Modifier::BOLD),
         line_style: Style::default().fg(Color::Rgb(86, 98, 120)),

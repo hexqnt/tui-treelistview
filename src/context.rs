@@ -1,34 +1,71 @@
 use ratatui::style::Style;
 
-/// Node-specific flags used while rendering a row.
+/// A node's effective expansion state in the current projection.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TreeExpansionState {
+    Leaf,
+    Collapsed,
+    Expanded,
+    ForcedByFilter,
+    Unloaded,
+    Loading,
+}
+
+impl TreeExpansionState {
+    /// Returns `true` when the node's descendants are currently visible.
+    #[must_use]
+    pub const fn is_expanded(self) -> bool {
+        matches!(self, Self::Expanded | Self::ForcedByFilter)
+    }
+
+    /// Returns `true` when the node accepts an expand action.
+    #[must_use]
+    pub const fn is_expandable(self) -> bool {
+        !matches!(self, Self::Leaf | Self::Loading)
+    }
+}
+
+/// A node's role in a filtered projection.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TreeMatchState {
+    Unfiltered,
+    Direct,
+    Ancestor,
+}
+
+/// A node's aggregated mark state.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum TreeMarkState {
+    #[default]
+    Unmarked,
+    Partial,
+    Marked,
+}
+
+/// Node state available to row renderers.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct TreeRowNodeState {
-    /// Whether the node is currently expanded.
-    pub is_expanded: bool,
-    /// Whether the node has children.
-    pub has_children: bool,
-    /// Whether the node is marked (directly or via its subtree).
-    pub is_marked: bool,
+    pub expansion: TreeExpansionState,
+    pub mark: TreeMarkState,
+    pub match_state: TreeMatchState,
 }
 
-/// Rendering flags that affect visual presentation.
+/// View state available to row renderers.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct TreeRowRenderState {
-    /// Whether guide lines should be rendered.
     pub draw_lines: bool,
+    pub is_selected: bool,
+    pub selected_column: Option<usize>,
 }
 
-/// Rendering context for a single tree row.
+/// Context for rendering one tree row.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct TreeRowContext<'a> {
-    /// Depth level of the node in the tree (root = 0).
-    pub level: u16,
-    /// Stack indicating whether each level on the path is the last child.
+    /// Node depth, with roots at level `0`.
+    pub level: usize,
+    /// For each path level, indicates whether that node is the last sibling.
     pub is_tail_stack: &'a [bool],
-    /// Node flags.
     pub node: TreeRowNodeState,
-    /// Render flags.
     pub render: TreeRowRenderState,
-    /// Style applied to guide line segments.
     pub line_style: Style,
 }

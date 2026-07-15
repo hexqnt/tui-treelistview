@@ -34,8 +34,22 @@ jobs:
       - name: Check
         run: cargo check --all-targets --all-features --locked
 
-      - name: Tests
+      - name: Check feature combinations
+        run: |
+          cargo check --all-targets --no-default-features --locked
+          cargo check --all-targets --no-default-features --features keymap --locked
+          cargo check --all-targets --no-default-features --features serde --locked
+
+      - name: Tests (all features)
         run: cargo test --all-features --locked
+
+      - name: Tests (core only)
+        run: cargo test --no-default-features --locked
+
+      - name: Documentation
+        env:
+          RUSTDOCFLAGS: -D warnings
+        run: cargo doc --all-features --no-deps --locked
 
       - name: Package
         run: cargo publish --dry-run --locked
