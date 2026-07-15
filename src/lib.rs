@@ -1,9 +1,9 @@
 //! An interactive, model-agnostic Ratatui tree table.
 //!
-//! [`TreeModel`] borrows a forest from application-owned data, [`TreeQuery`] describes filtering
-//! and sorting, and [`TreeListViewState`] owns stable UI state plus the derived [`TreeProjection`]
-//! cache. [`TreeListView`] uses that same projection for viewport-only rendering, ensuring input
-//! and display always agree.
+//! [`TreeModel`] borrows a rooted acyclic graph from application-owned data, [`TreeQuery`]
+//! describes filtering and sorting, and [`TreeListViewState`] owns stable UI state plus the derived
+//! [`TreeProjection`] cache. [`TreeListView`] uses that same projection for viewport-only
+//! rendering, ensuring input and display always agree.
 //!
 //! The model API supports stable generic IDs, multiple roots, asynchronous child states, and
 //! explicit revisions. The view adds typed actions and intents, validated dynamic columns,

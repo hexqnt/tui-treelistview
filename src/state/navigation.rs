@@ -6,31 +6,27 @@ use crate::style::TreeScrollPolicy;
 use super::TreeListViewState;
 
 impl<Id: Copy + Eq + Hash> TreeListViewState<Id> {
-    /// Returns the selected identifier, the source of truth for selection.
+    /// Возвращает идентификатор выбранной строки.
     #[must_use]
     pub const fn selected_id(&self) -> Option<Id> {
         self.selected
     }
 
-    /// Returns the selected node's current projection index.
+    /// Возвращает индекс выбранного вхождения в текущей проекции.
     #[must_use]
-    pub fn selected_index(&self) -> Option<usize> {
-        self.selected
-            .and_then(|selected| self.projection.index_of(selected))
+    pub const fn selected_index(&self) -> Option<usize> {
+        self.selected_row
     }
 
-    /// Selects a visible node by identifier.
+    /// Выбирает первое видимое вхождение узла по идентификатору.
     pub fn select_id(&mut self, selected: Option<Id>) -> bool {
-        let selected = selected.filter(|id| self.projection.index_of(*id).is_some());
-        self.set_selection(selected)
+        let index = selected.and_then(|id| self.projection.index_of(id));
+        self.set_selection(index)
     }
 
     /// Selects a row in the current projection.
     pub fn select_index(&mut self, index: Option<usize>) -> bool {
-        let selected = index
-            .and_then(|index| self.projection.nodes().get(index))
-            .map(|node| node.id());
-        self.set_selection(selected)
+        self.set_selection(index)
     }
 
     /// Selects the first row.
@@ -70,10 +66,7 @@ impl<Id: Copy + Eq + Hash> TreeListViewState<Id> {
 
     /// Selects the visible parent.
     pub fn select_parent(&mut self) -> bool {
-        let parent = self
-            .selected_node()
-            .and_then(ProjectedNode::parent)
-            .filter(|parent| self.projection.index_of(*parent).is_some());
+        let parent = self.selected_node().and_then(ProjectedNode::parent_index);
         parent.is_some() && self.set_selection(parent)
     }
 
@@ -90,7 +83,7 @@ impl<Id: Copy + Eq + Hash> TreeListViewState<Id> {
             .nodes()
             .get(index.saturating_add(1))
             .filter(|candidate| candidate.level() == parent.level().saturating_add(1))
-            .map(|candidate| candidate.id());
+            .map(|_| index.saturating_add(1));
         child.is_some() && self.set_selection(child)
     }
 
@@ -271,9 +264,14 @@ impl<Id: Copy + Eq + Hash> TreeListViewState<Id> {
         self.column_needs_visibility = false;
     }
 
-    fn set_selection(&mut self, selected: Option<Id>) -> bool {
-        let changed = self.selected != selected;
+    fn set_selection(&mut self, selected_row: Option<usize>) -> bool {
+        let selected_row = selected_row.filter(|&index| index < self.projection.len());
+        let selected = selected_row
+            .and_then(|index| self.projection.nodes().get(index))
+            .map(|node| node.id());
+        let changed = self.selected != selected || self.selected_row != selected_row;
         self.selected = selected;
+        self.selected_row = selected_row;
         if changed {
             self.selection_needs_visibility = selected.is_some();
         }

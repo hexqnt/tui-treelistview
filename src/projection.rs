@@ -10,11 +10,23 @@ use crate::model::{
 };
 use crate::traversal::TreePostorder;
 
+pub struct OccurrencePath<Id> {
+    root_parent: Option<Id>,
+    ids: SmallVec<[Id; 16]>,
+}
+
+impl<Id> OccurrencePath<Id> {
+    pub fn len(&self) -> usize {
+        self.ids.len()
+    }
+}
+
 /// A node in the flat visible tree projection.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ProjectedNode<Id> {
     id: Id,
     parent: Option<Id>,
+    parent_index: Option<usize>,
     level: usize,
     is_last_sibling: bool,
     visible_child_count: usize,
@@ -31,6 +43,15 @@ impl<Id: Copy> ProjectedNode<Id> {
     #[must_use]
     pub const fn parent(self) -> Option<Id> {
         self.parent
+    }
+
+    /// Возвращает индекс родительского вхождения в проекции строк.
+    ///
+    /// В отличие от [`Self::parent`], различает повторные вхождения одной вершины
+    /// модели в проекции DAG.
+    #[must_use]
+    pub const fn parent_index(self) -> Option<usize> {
+        self.parent_index
     }
 
     #[must_use]
@@ -122,13 +143,13 @@ impl<Id: Copy + Eq + Hash> TreeProjection<Id> {
         self.nodes.is_empty()
     }
 
-    /// Returns the index of a visible node.
+    /// Возвращает индекс первого видимого вхождения узла.
     #[must_use]
     pub fn index_of(&self, id: Id) -> Option<usize> {
         self.index.get(&id).copied()
     }
 
-    /// Returns a visible node by identifier.
+    /// Возвращает первое видимое вхождение узла по идентификатору.
     #[must_use]
     pub fn get_by_id(&self, id: Id) -> Option<ProjectedNode<Id>> {
         self.index_of(id)
@@ -178,14 +199,14 @@ impl<Id: Copy + Eq + Hash> TreeProjection<Id> {
 
         match query.root_visibility() {
             TreeRootVisibility::Visible => {
-                Self::push_children(&mut stack, &roots, None, 0);
+                Self::push_children(&mut stack, &roots, None, None, 0);
             }
             TreeRootVisibility::Hidden => {
                 for root in roots.iter().rev().copied() {
                     let mut children =
                         self.visible_children(query, model.children(root).loaded_slice());
                     Self::sort_ids(model, query.sort(), &mut children);
-                    Self::push_children(&mut stack, &children, Some(root), 0);
+                    Self::push_children(&mut stack, &children, Some(root), None, 0);
                 }
             }
         }
@@ -235,19 +256,21 @@ impl<Id: Copy + Eq + Hash> TreeProjection<Id> {
             self.nodes.push(ProjectedNode {
                 id: frame.id,
                 parent: frame.parent,
+                parent_index: frame.parent_index,
                 level: frame.level,
                 is_last_sibling: frame.is_last_sibling,
                 visible_child_count: visible_children.len(),
                 expansion,
                 match_state,
             });
-            self.index.insert(frame.id, index);
+            self.index.entry(frame.id).or_insert(index);
 
             if expansion.is_expanded() {
                 Self::push_children(
                     &mut stack,
                     &visible_children,
                     Some(frame.id),
+                    Some(index),
                     frame.level.saturating_add(1),
                 );
             }
@@ -330,10 +353,69 @@ impl<Id: Copy + Eq + Hash> TreeProjection<Id> {
         }
     }
 
+    pub(crate) fn occurrence_path(&self, index: usize) -> Option<OccurrencePath<Id>> {
+        let mut ids = SmallVec::new();
+        let mut cursor = Some(index);
+        let mut root_parent = None;
+        while let Some(index) = cursor {
+            let node = self.nodes.get(index)?;
+            ids.push(node.id);
+            cursor = node.parent_index;
+            if cursor.is_none() {
+                root_parent = node.parent;
+            }
+        }
+        ids.reverse();
+        Some(OccurrencePath { root_parent, ids })
+    }
+
+    pub(crate) fn index_of_path(&self, path: &OccurrencePath<Id>) -> Option<usize> {
+        self.index_of_path_prefix(path, path.len())
+    }
+
+    pub(crate) fn index_of_path_prefix(
+        &self,
+        path: &OccurrencePath<Id>,
+        end: usize,
+    ) -> Option<usize> {
+        let ids = path.ids.get(..end)?;
+        let (&id, _) = ids.split_last()?;
+        let first = self.index_of(id)?;
+        if self.path_matches(first, path.root_parent, ids) {
+            return Some(first);
+        }
+        self.nodes[first + 1..]
+            .iter()
+            .enumerate()
+            .filter(|(_, node)| node.id == id)
+            .find_map(|(offset, _)| {
+                let index = first + 1 + offset;
+                self.path_matches(index, path.root_parent, ids)
+                    .then_some(index)
+            })
+    }
+
+    fn path_matches(&self, index: usize, root_parent: Option<Id>, ids: &[Id]) -> bool {
+        let mut cursor = Some(index);
+        let mut actual_root_parent = None;
+        for &expected_id in ids.iter().rev() {
+            let Some(node) = cursor.and_then(|index| self.nodes.get(index)) else {
+                return false;
+            };
+            if node.id != expected_id {
+                return false;
+            }
+            cursor = node.parent_index;
+            actual_root_parent = node.parent;
+        }
+        cursor.is_none() && actual_root_parent == root_parent
+    }
+
     fn push_children(
         stack: &mut Vec<ProjectionFrame<Id>>,
         children: &[Id],
         parent: Option<Id>,
+        parent_index: Option<usize>,
         level: usize,
     ) {
         let last = children.len().saturating_sub(1);
@@ -346,6 +428,7 @@ impl<Id: Copy + Eq + Hash> TreeProjection<Id> {
                 .map(|(index, id)| ProjectionFrame {
                     id,
                     parent,
+                    parent_index,
                     level,
                     is_last_sibling: index == last,
                 }),
@@ -356,6 +439,7 @@ impl<Id: Copy + Eq + Hash> TreeProjection<Id> {
 struct ProjectionFrame<Id> {
     id: Id,
     parent: Option<Id>,
+    parent_index: Option<usize>,
     level: usize,
     is_last_sibling: bool,
 }

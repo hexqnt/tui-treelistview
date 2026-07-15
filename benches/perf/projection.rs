@@ -44,6 +44,19 @@ pub fn rebuild(c: &mut Criterion) {
         });
     }
 
+    let model = BenchTree::chain(20_000);
+    let mut query = TreeQuery::<NoFilter, NoSort>::new();
+    let mut state = expanded_state(&model, &query);
+    let _ = state.select_last();
+    group.throughput(Throughput::Elements(20_000));
+    group.bench_function(BenchmarkId::new("selected_chain", 20_000), |b| {
+        b.iter(|| {
+            query.touch_sort();
+            let rebuilt = state.ensure_projection(black_box(&model), black_box(&query));
+            black_box((rebuilt, state.selected_index()));
+        });
+    });
+
     let forest = BenchTree::forest(20_000, 4, 64);
     for visibility in [TreeRootVisibility::Visible, TreeRootVisibility::Hidden] {
         let name = match visibility {

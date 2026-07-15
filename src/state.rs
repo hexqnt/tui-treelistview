@@ -110,6 +110,7 @@ impl<T> Deref for RevisionedSet<T> {
 pub struct TreeListViewState<Id> {
     projection: TreeProjection<Id>,
     selected: Option<Id>,
+    selected_row: Option<usize>,
     selection_needs_visibility: bool,
     offset: usize,
     selected_column: Option<usize>,
@@ -139,6 +140,7 @@ impl<Id: Copy + Eq + Hash> TreeListViewState<Id> {
         Self {
             projection: TreeProjection::with_capacity(capacity),
             selected: None,
+            selected_row: None,
             selection_needs_visibility: false,
             offset: 0,
             selected_column: None,
@@ -201,6 +203,7 @@ impl<Id: Copy + Eq + Hash> TreeListViewState<Id> {
         self.manual_marked
             .replace(snapshot.manual_marked.into_iter().collect());
         self.selected = snapshot.selected;
+        self.selected_row = None;
         self.selection_needs_visibility = self.selected.is_some();
         self.selected_column = snapshot.selected_column;
         self.column_needs_visibility = self.selected_column.is_some();
@@ -227,8 +230,11 @@ impl<Id: Copy + Eq + Hash> TreeListViewState<Id> {
     }
 
     pub(crate) fn selected_node(&self) -> Option<ProjectedNode<Id>> {
-        self.selected
-            .and_then(|selected| self.projection.get_by_id(selected))
+        let selected = self.selected?;
+        self.selected_row
+            .and_then(|index| self.projection.nodes().get(index))
+            .copied()
+            .filter(|node| node.id() == selected)
     }
 
     #[cfg(feature = "keymap")]

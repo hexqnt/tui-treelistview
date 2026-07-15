@@ -40,6 +40,20 @@ impl TestTree {
         }
     }
 
+    fn dag_with_shared_leaf() -> Self {
+        Self {
+            roots: vec![0],
+            children: vec![
+                Children::Loaded(vec![1, 2]),
+                Children::Loaded(vec![3, 4]),
+                Children::Loaded(vec![3]),
+                Children::Leaf,
+                Children::Leaf,
+            ],
+            revision: TreeRevision::INITIAL,
+        }
+    }
+
     fn remove(&mut self, parent: usize, node: usize) {
         if let Children::Loaded(children) = &mut self.children[parent] {
             children.retain(|child| *child != node);
@@ -327,6 +341,98 @@ fn selection_uses_stable_ids_across_sorting_and_model_changes() {
     model.remove(0, 2);
     assert!(state.ensure_projection(&model, &clear));
     assert_eq!(state.selected_id(), None);
+}
+
+#[test]
+fn selection_follows_a_stable_id_when_its_path_changes() {
+    let mut model = TestTree::forest();
+    let query = TreeQuery::new();
+    let mut state = TreeListViewState::new();
+    assert!(state.expand_all(&model));
+    assert!(state.select_by_id(&model, &query, 3));
+
+    model.remove(1, 3);
+    let Children::Loaded(children) = &mut model.children[4] else {
+        panic!("node 4 must be a loaded branch");
+    };
+    children.push(3);
+    model.revision.advance();
+
+    assert!(state.ensure_projection(&model, &query));
+    assert_eq!(state.selected_id(), Some(3));
+    assert_eq!(state.selected_parent_id(), Some(4));
+}
+
+#[test]
+fn navigation_distinguishes_repeated_dag_node_occurrences() {
+    let mut model = TestTree::dag_with_shared_leaf();
+    let query = TreeQuery::new();
+    let mut state = TreeListViewState::new();
+    assert!(state.expand_all(&model));
+    assert!(state.ensure_projection(&model, &query));
+    assert_eq!(state.visible_ids().collect::<Vec<_>>(), [0, 1, 3, 4, 2, 3]);
+
+    assert!(state.select_index(Some(3)));
+    assert!(state.select_prev());
+    assert_eq!(state.selected_id(), Some(3));
+    assert_eq!(state.selected_index(), Some(2));
+    assert!(state.select_next());
+    assert_eq!(state.selected_id(), Some(4));
+    assert_eq!(state.selected_index(), Some(3));
+
+    assert!(state.select_index(Some(5)));
+    assert!(state.select_parent());
+    assert_eq!(state.selected_id(), Some(2));
+    assert_eq!(state.selected_index(), Some(4));
+
+    assert!(state.select_index(Some(5)));
+    model.revision.advance();
+    assert!(state.ensure_projection(&model, &query));
+    assert_eq!(state.selected_id(), Some(3));
+    assert_eq!(state.selected_index(), Some(5));
+
+    model.remove(2, 3);
+    assert!(state.ensure_projection(&model, &query));
+    assert_eq!(state.selected_id(), Some(3));
+    assert_eq!(state.selected_index(), Some(2));
+}
+
+#[test]
+fn selection_distinguishes_occurrences_below_hidden_roots() {
+    let mut model = TestTree {
+        roots: vec![0, 1],
+        children: vec![
+            Children::Loaded(vec![2]),
+            Children::Loaded(vec![2]),
+            Children::Leaf,
+        ],
+        revision: TreeRevision::INITIAL,
+    };
+    let query = TreeQuery::new().with_root_visibility(TreeRootVisibility::Hidden);
+    let mut state = TreeListViewState::new();
+    assert!(state.ensure_projection(&model, &query));
+    assert_eq!(state.visible_ids().collect::<Vec<_>>(), [2, 2]);
+    assert!(state.select_index(Some(1)));
+    assert_eq!(state.selected_parent_id(), Some(1));
+
+    model.revision.advance();
+    assert!(state.ensure_projection(&model, &query));
+    assert_eq!(state.selected_index(), Some(1));
+    assert_eq!(state.selected_parent_id(), Some(1));
+}
+
+#[test]
+fn selecting_an_invalid_index_clears_the_selection() {
+    let model = TestTree::forest();
+    let query = TreeQuery::new();
+    let mut state = TreeListViewState::new();
+    assert!(state.ensure_projection(&model, &query));
+    assert!(state.select_first());
+
+    assert!(state.select_index(Some(usize::MAX)));
+    assert_eq!(state.selected_id(), None);
+    assert_eq!(state.selected_index(), None);
+    assert!(!state.select_index(Some(usize::MAX)));
 }
 
 #[test]

@@ -370,11 +370,12 @@ impl<P> QueryPolicy<P> {
     }
 }
 
-/// The minimal contract for a tree or forest data source.
+/// Минимальный контракт источника дерева, леса или корневого ациклического графа.
 ///
-/// The data must form a real tree without cycles or shared children. Identifiers must be stable
-/// and cheap to copy. Every identifier returned by `roots` or `children` must be valid for later
-/// model method calls.
+/// Общие дочерние вершины допустимы и создают отдельные вхождения видимых строк. Циклы, повторные
+/// корни и повторные идентификаторы в одном списке детей недопустимы. Идентификаторы должны быть
+/// стабильными и дешёвыми для копирования. Каждый идентификатор из `roots` или `children` должен
+/// оставаться корректным для последующих вызовов методов модели.
 pub trait TreeModel {
     /// The node identifier type.
     type Id: Copy + Eq + Hash;

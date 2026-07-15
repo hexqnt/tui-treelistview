@@ -30,12 +30,13 @@ Typical usage:
 3. Keep `TreeListViewState` in the application state.
 4. Handle actions or keys and render `TreeListView` each frame.
 
-`TreeModel` assumes a real forest: IDs are stable and unique, nodes have one parent, cycles are not
+`TreeModel` accepts rooted trees, forests, and acyclic graphs: IDs are stable, shared children are
+shown as distinct row occurrences, roots and sibling lists contain no duplicate IDs, cycles are not
 allowed, and `revision()` changes after relevant model updates.
 
 ## Features
 
-- Generic stable node IDs and multiple roots.
+- Generic stable node IDs, multiple roots, and occurrence-aware DAG navigation.
 - Lazy `Unloaded` and `Loading` child states.
 - Filtering, sibling sorting, and stable-ID selection.
 - Dynamic columns, horizontal scrolling, and viewport row virtualization.

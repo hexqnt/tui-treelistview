@@ -90,10 +90,12 @@ impl<Id: Copy + Eq + Hash> TreeListViewState<Id> {
             TreeSelectionUpdate::Keep => {}
             TreeSelectionUpdate::Select(id) => {
                 self.selected = Some(id);
+                self.selected_row = None;
                 self.selection_needs_visibility = true;
             }
             TreeSelectionUpdate::Clear => {
                 self.selected = None;
+                self.selected_row = None;
                 self.selection_needs_visibility = false;
             }
         }

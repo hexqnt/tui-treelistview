@@ -66,20 +66,22 @@ where
     fn build_rows(
         &self,
         projection: &TreeProjection<T::Id>,
-        nodes: &[ProjectedNode<T::Id>],
-        selected: Option<T::Id>,
+        rendered: std::ops::Range<usize>,
+        selected: Option<usize>,
         selected_column: Option<usize>,
         draw_lines: bool,
         marks: impl Fn(T::Id) -> TreeMarkState,
     ) -> Vec<Row<'a>> {
+        let start_index = rendered.start;
+        let nodes = &projection.nodes()[rendered];
         let mut rows = Vec::with_capacity(nodes.len());
         let mut tails = nodes.first().map_or_else(SmallVec::new, |node| {
             Self::tail_stack_before(projection, *node)
         });
 
-        for node in nodes {
+        for (relative_index, node) in nodes.iter().enumerate() {
             Self::update_tail_stack(&mut tails, *node);
-            let is_selected = selected == Some(node.id());
+            let is_selected = selected == Some(start_index.saturating_add(relative_index));
             let mark = marks(node.id());
             let context = TreeRowContext {
                 level: node.level(),
@@ -126,15 +128,15 @@ where
         node: ProjectedNode<T::Id>,
     ) -> SmallVec<[bool; 32]> {
         let mut reversed = SmallVec::<[bool; 32]>::new();
-        let mut parent = node.parent();
-        while let Some(parent_id) = parent {
-            let Some(parent_node) = projection.get_by_id(parent_id) else {
+        let mut parent = node.parent_index();
+        while let Some(parent_index) = parent {
+            let Some(parent_node) = projection.nodes().get(parent_index).copied() else {
                 break;
             };
             if parent_node.level() > 0 {
                 reversed.push(parent_node.is_last_sibling());
             }
-            parent = parent_node.parent();
+            parent = parent_node.parent_index();
         }
         reversed.reverse();
         reversed
@@ -246,11 +248,10 @@ where
             column_boxes,
             rows: row_window,
         } = plan;
-        let nodes = &state.projection().nodes()[row_window.rendered.clone()];
         let rows = self.build_rows(
             state.projection(),
-            nodes,
-            state.selected_id(),
+            row_window.rendered.clone(),
+            state.selected_index(),
             state.selected_column(),
             state.draw_lines(),
             |id| state.mark_state_cached(id),

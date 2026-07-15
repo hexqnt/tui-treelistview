@@ -7,7 +7,7 @@ use crate::context::TreeExpansionState;
 use crate::model::{
     TreeChildren, TreeFilter, TreeModel, TreeQuery, TreeSelectionFallback, TreeSort,
 };
-use crate::projection::ProjectedNode;
+use crate::projection::{OccurrencePath, ProjectedNode};
 use crate::traversal::TreeWalk;
 
 use super::{ExpansionPath, TreeListViewState};
@@ -27,19 +27,18 @@ impl<Id: Copy + Eq + Hash> TreeListViewState<Id> {
             return false;
         }
 
-        let old_index = self
-            .selected
-            .and_then(|selected| self.projection.index_of(selected));
-        let old_ancestors = self
-            .selected
-            .map(|selected| self.visible_ancestors(selected))
-            .unwrap_or_default();
+        let old_index = self.selected_row;
+        let old_path = old_index.and_then(|index| self.projection.occurrence_path(index));
         let expanded = &self.expanded;
         self.projection
             .rebuild(model, query, expansion_revision, |parent, id| {
                 expanded.contains(&ExpansionPath::new(parent, id))
             });
-        self.restore_selection_after_rebuild(old_index, &old_ancestors, query.selection_fallback());
+        self.restore_selection_after_rebuild(
+            old_index,
+            old_path.as_ref(),
+            query.selection_fallback(),
+        );
         self.selection_needs_visibility = self.selected.is_some();
         self.clamp_offsets();
         true
@@ -56,8 +55,9 @@ impl<Id: Copy + Eq + Hash> TreeListViewState<Id> {
             return false;
         }
         self.ensure_projection(model, query);
-        if self.projection.index_of(id).is_some() {
+        if let Some(index) = self.projection.index_of(id) {
             self.selected = Some(id);
+            self.selected_row = Some(index);
             self.selection_needs_visibility = true;
             true
         } else {
@@ -169,54 +169,58 @@ impl<Id: Copy + Eq + Hash> TreeListViewState<Id> {
         })
     }
 
-    fn visible_ancestors(&self, id: Id) -> SmallVec<[Id; 16]> {
-        let mut ancestors = SmallVec::new();
-        let mut cursor = self
-            .projection
-            .get_by_id(id)
-            .and_then(ProjectedNode::parent);
-        while let Some(parent) = cursor {
-            ancestors.push(parent);
-            cursor = self
-                .projection
-                .get_by_id(parent)
-                .and_then(ProjectedNode::parent);
-        }
-        ancestors
-    }
-
     fn restore_selection_after_rebuild(
         &mut self,
         old_index: Option<usize>,
-        old_ancestors: &[Id],
+        old_path: Option<&OccurrencePath<Id>>,
         fallback: TreeSelectionFallback,
     ) {
-        if self
+        if let Some(path) = old_path {
+            if let Some(index) = self.projection.index_of_path(path) {
+                self.select_rebuilt_row(Some(index));
+                return;
+            }
+
+            if let Some(index) = self
+                .selected
+                .and_then(|selected| self.projection.index_of(selected))
+            {
+                self.select_rebuilt_row(Some(index));
+                return;
+            }
+
+            if matches!(fallback, TreeSelectionFallback::ParentThenNearest) {
+                for end in (1..path.len()).rev() {
+                    if let Some(index) = self.projection.index_of_path_prefix(path, end) {
+                        self.select_rebuilt_row(Some(index));
+                        return;
+                    }
+                }
+            }
+        } else if let Some(index) = self
             .selected
-            .is_some_and(|selected| self.projection.index_of(selected).is_some())
+            .and_then(|selected| self.projection.index_of(selected))
         {
+            self.select_rebuilt_row(Some(index));
             return;
         }
 
-        if matches!(fallback, TreeSelectionFallback::ParentThenNearest)
-            && let Some(parent) = old_ancestors
-                .iter()
-                .copied()
-                .find(|parent| self.projection.index_of(*parent).is_some())
-        {
-            self.selected = Some(parent);
-            return;
-        }
-
-        self.selected = match fallback {
+        let selected_row = match fallback {
             TreeSelectionFallback::Clear => None,
             TreeSelectionFallback::Nearest | TreeSelectionFallback::ParentThenNearest => old_index
                 .and_then(|index| {
                     let index = index.min(self.projection.len().saturating_sub(1));
-                    self.projection.nodes().get(index)
-                })
-                .map(|node| node.id()),
+                    self.projection.nodes().get(index).map(|_| index)
+                }),
         };
+        self.select_rebuilt_row(selected_row);
+    }
+
+    fn select_rebuilt_row(&mut self, selected_row: Option<usize>) {
+        self.selected = selected_row
+            .and_then(|index| self.projection.nodes().get(index))
+            .map(|node| node.id());
+        self.selected_row = selected_row;
     }
 
     fn clamp_offsets(&mut self) {
