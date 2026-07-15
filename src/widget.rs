@@ -507,19 +507,30 @@ fn render_scrollbars(
     viewport_height: usize,
 ) {
     if let Some(area) = layout.vertical_scrollbar {
-        let mut scrollbar_state = ScrollbarState::new(total_rows)
-            .position(vertical_offset)
-            .viewport_content_length(viewport_height);
+        let mut scrollbar_state =
+            ScrollbarState::new(scrollbar_position_count(total_rows, viewport_height))
+                .position(vertical_offset)
+                .viewport_content_length(viewport_height);
         Scrollbar::default()
             .orientation(ScrollbarOrientation::VerticalRight)
             .render(area, buffer, &mut scrollbar_state);
     }
     if let Some(area) = layout.horizontal_scrollbar {
-        let mut scrollbar_state = ScrollbarState::new(layout.virtual_width as usize)
-            .position(horizontal_offset as usize)
-            .viewport_content_length(layout.table.width as usize);
+        let viewport_width = layout.table.width as usize;
+        let mut scrollbar_state = ScrollbarState::new(scrollbar_position_count(
+            layout.virtual_width as usize,
+            viewport_width,
+        ))
+        .position(horizontal_offset as usize)
+        .viewport_content_length(viewport_width);
         Scrollbar::default()
             .orientation(ScrollbarOrientation::HorizontalBottom)
             .render(area, buffer, &mut scrollbar_state);
     }
+}
+
+const fn scrollbar_position_count(content_length: usize, viewport_length: usize) -> usize {
+    content_length
+        .saturating_sub(viewport_length)
+        .saturating_add(1)
 }

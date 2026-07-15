@@ -2,9 +2,9 @@ use ratatui::buffer::Buffer;
 use ratatui::layout::{Position, Rect};
 use ratatui::widgets::{Cell, StatefulWidget};
 use tui_treelistview::{
-    ColumnDef, ColumnWidth, TreeChildren, TreeColumnSet, TreeHit, TreeLabelPrefix,
-    TreeLabelProvider, TreeListView, TreeListViewState, TreeListViewStyle, TreeModel, TreeQuery,
-    TreeRevision, TreeRowContext, TreeRowRendering,
+    ColumnDef, ColumnWidth, TreeChildren, TreeColumnSet, TreeHit, TreeHorizontalScroll,
+    TreeLabelPrefix, TreeLabelProvider, TreeListView, TreeListViewState, TreeListViewStyle,
+    TreeModel, TreeQuery, TreeRevision, TreeRowContext, TreeRowRendering,
 };
 
 struct Model {
@@ -178,5 +178,70 @@ fn rendering_clamps_the_offset_to_the_last_full_viewport() {
     assert_eq!(
         buffer.cell((16, 0)).map(ratatui::buffer::Cell::symbol),
         Some("├")
+    );
+}
+
+#[test]
+fn vertical_scrollbar_reaches_the_end_at_the_last_viewport() {
+    let model = Model::sample();
+    let query = TreeQuery::new();
+    let columns = columns(false);
+    let label = Label;
+    let mut state = TreeListViewState::new();
+    let _ = state.expand_all(&model);
+    let _ = state.ensure_projection(&model, &query);
+    let _ = state.set_offset(usize::MAX);
+    let area = Rect::new(0, 0, 20, 4);
+    let mut buffer = Buffer::empty(area);
+    TreeListView::new(
+        &model,
+        &query,
+        &label,
+        &columns,
+        TreeListViewStyle {
+            horizontal_scroll: TreeHorizontalScroll::Disabled,
+            ..TreeListViewStyle::borderless()
+        },
+    )
+    .render(area, &mut buffer, &mut state);
+
+    assert_eq!(state.offset(), 2);
+    assert_eq!(
+        buffer.cell((19, 1)).map(ratatui::buffer::Cell::symbol),
+        Some("║")
+    );
+    assert_eq!(
+        buffer.cell((19, 2)).map(ratatui::buffer::Cell::symbol),
+        Some("█")
+    );
+}
+
+#[test]
+fn horizontal_scrollbar_reaches_the_end_at_the_maximum_offset() {
+    let model = Model::sample();
+    let query = TreeQuery::new();
+    let columns = columns(false);
+    let label = Label;
+    let mut state = TreeListViewState::new();
+    let _ = state.set_horizontal_offset(u16::MAX);
+    let area = Rect::new(0, 0, 12, 8);
+    let mut buffer = Buffer::empty(area);
+    TreeListView::new(
+        &model,
+        &query,
+        &label,
+        &columns,
+        TreeListViewStyle::borderless(),
+    )
+    .render(area, &mut buffer, &mut state);
+
+    assert_eq!(state.horizontal_offset(), 16);
+    assert_eq!(
+        buffer.cell((10, 7)).map(ratatui::buffer::Cell::symbol),
+        Some("█")
+    );
+    assert_eq!(
+        buffer.cell((11, 7)).map(ratatui::buffer::Cell::symbol),
+        Some("►")
     );
 }
