@@ -435,4 +435,3 @@ where
 fn next_query_policy_generation() -> TreeRevision {
     TreeRevision::new(NEXT_QUERY_POLICY_GENERATION.fetch_add(1, AtomicOrdering::Relaxed))
 }
-

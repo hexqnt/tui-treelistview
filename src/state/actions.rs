@@ -304,4 +304,3 @@ const fn changed_event<Id, Custom>(changed: bool) -> TreeEvent<Id, Custom> {
         TreeEvent::Unchanged
     }
 }
-

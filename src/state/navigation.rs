@@ -201,6 +201,7 @@ impl<Id: Copy + Eq + Hash> TreeListViewState<Id> {
         }
         let column = self
             .selected_column
+            .filter(|column| *column < column_count)
             .map_or(column_count - 1, |column| column.saturating_sub(1));
         self.select_column(Some(column), column_count)
     }
@@ -211,6 +212,7 @@ impl<Id: Copy + Eq + Hash> TreeListViewState<Id> {
         }
         let column = self
             .selected_column
+            .filter(|column| *column < column_count)
             .map_or(0, |column| column.saturating_add(1).min(column_count - 1));
         self.select_column(Some(column), column_count)
     }

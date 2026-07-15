@@ -73,3 +73,17 @@ cargo run --example demo --features keymap -- ./ 3
 Demo keys: arrows or `hjkl` navigate, Enter toggles, `E`/`C` expand or collapse all,
 Shift+Up/Down reorder, `a` adds, `e` renames, `d` detaches, `D` deletes, `y`/`p` yank and paste,
 Tab changes columns, Ctrl+Left/Right scrolls horizontally, and `q`/Esc exits.
+
+## Benchmarks
+
+The Criterion suite covers balanced, deep, wide, and multi-root trees; projection cache hits and
+rebuilds; filtering and sorting; marks and deep selection; indexed-tree validation; and full,
+virtualized, and horizontally scrolled rendering.
+
+```bash
+cargo bench --bench perf
+cargo bench --bench perf -- --test
+cargo bench --bench perf -- projection/rebuild
+```
+
+The `--test` mode executes every scenario once and is useful as a fast benchmark smoke test.

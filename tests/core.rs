@@ -523,3 +523,24 @@ fn snapshots_preserve_ids_and_both_scroll_offsets() {
         assert_eq!(decoded, snapshot);
     }
 }
+
+#[test]
+fn column_navigation_recovers_from_a_stale_snapshot_index() {
+    let snapshot = TreeListViewSnapshot {
+        expanded: vec![],
+        manual_marked: vec![],
+        selected: None,
+        selected_column: Some(usize::MAX),
+        offset: 0,
+        horizontal_offset: 0,
+        draw_lines: true,
+    };
+    let mut state = TreeListViewState::<usize>::from_snapshot(snapshot.clone());
+
+    assert!(state.select_column_left(2));
+    assert_eq!(state.selected_column(), Some(1));
+
+    state.restore(snapshot);
+    assert!(state.select_column_right(2));
+    assert_eq!(state.selected_column(), Some(0));
+}

@@ -17,7 +17,6 @@ include = [
     "img/**",
     "Cargo.toml",
     "README.md",
-    "CHANGELOG.md",
     "LICENSE*",
 ]
 
