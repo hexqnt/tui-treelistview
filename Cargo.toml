@@ -1,6 +1,6 @@
 [package]
 name = "tui-treelistview"
-version = "0.2.0"
+version = "0.2.1"
 edition = "2024"
 license = "MIT OR Apache-2.0"
 description = "Interactive tree list widget for Ratatui"
@@ -14,7 +14,6 @@ include = [
     "examples/**",
     "benches/**",
     "tests/**",
-    "img/**",
     "Cargo.toml",
     "README.md",
     "LICENSE*",
@@ -47,6 +46,7 @@ serde_json = "1.0.149"
 
 [[bench]]
 name = "perf"
+path = "benches/perf/main.rs"
 harness = false
 
 [lints.clippy]
