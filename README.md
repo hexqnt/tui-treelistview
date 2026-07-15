@@ -9,7 +9,7 @@ A tree-list widget for [Ratatui](https://ratatui.rs/).
 The widget focuses on interaction with tree data: browsing, navigation, filtering, sorting, marks,
 and editing workflows rather than passive rendering alone.
 
-![demo](img/demo.gif)
+![demo](assets/demo.gif)
 
 > This widget is the open part of a closed-source project, so some features may be highly
 > specialized.
