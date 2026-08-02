@@ -398,6 +398,20 @@ fn navigation_distinguishes_repeated_dag_node_occurrences() {
 }
 
 #[test]
+fn select_by_id_expands_the_first_dag_occurrence_path() {
+    let model = TestTree::dag_with_shared_leaf();
+    let query = TreeQuery::new();
+    let mut state = TreeListViewState::new();
+
+    assert!(state.select_by_id(&model, &query, 3));
+    assert_eq!(state.visible_ids().collect::<Vec<_>>(), [0, 1, 3, 4, 2]);
+    assert_eq!(state.selected_parent_id(), Some(1));
+    assert!(state.node_is_expanded(0, None));
+    assert!(state.node_is_expanded(1, Some(0)));
+    assert!(!state.node_is_expanded(2, Some(0)));
+}
+
+#[test]
 fn selection_distinguishes_occurrences_below_hidden_roots() {
     let mut model = TestTree {
         roots: vec![0, 1],

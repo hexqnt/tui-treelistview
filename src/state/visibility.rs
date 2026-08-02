@@ -1,6 +1,5 @@
 use std::hash::Hash;
 
-use rustc_hash::{FxBuildHasher, FxHashMap};
 use smallvec::SmallVec;
 
 use crate::context::TreeExpansionState;
@@ -67,34 +66,28 @@ impl<Id: Copy + Eq + Hash> TreeListViewState<Id> {
 
     /// Expands every loaded ancestor of a node.
     pub fn expand_to<T: TreeModel<Id = Id>>(&mut self, model: &T, target: Id) -> bool {
-        let hint = model.size_hint();
-        let mut parents = FxHashMap::with_capacity_and_hasher(hint, FxBuildHasher);
+        let mut path = SmallVec::<[(ExpansionPath<Id>, bool); 16]>::new();
         let mut found = false;
         for node in TreeWalk::forest(model) {
-            parents.insert(node.id, (node.parent, node.children.is_branch()));
+            path.truncate(node.level);
             if node.id == target {
                 found = true;
                 break;
             }
+            path.push((
+                ExpansionPath::new(node.parent, node.id),
+                node.children.is_branch(),
+            ));
         }
         if !found {
             return false;
         }
 
-        let mut path = SmallVec::<[Id; 16]>::new();
-        let mut cursor = Some(target);
-        while let Some(id) = cursor {
-            path.push(id);
-            cursor = parents.get(&id).and_then(|(parent, _)| *parent);
-        }
-        path.reverse();
-
         self.expanded.mutate(|expanded| {
             let mut changed = false;
-            for window in path.windows(2) {
-                let (parent, is_branch) = parents[&window[0]];
+            for &(ancestor, is_branch) in &path {
                 if is_branch {
-                    changed |= expanded.insert(ExpansionPath::new(parent, window[0]));
+                    changed |= expanded.insert(ancestor);
                 }
             }
             changed

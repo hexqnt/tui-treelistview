@@ -5,18 +5,19 @@ type PostorderFrame<'a, Id> = (Id, Option<&'a [Id]>);
 pub struct TreeWalkNode<'a, Id> {
     pub parent: Option<Id>,
     pub id: Id,
+    pub level: usize,
     pub children: TreeChildren<'a, Id>,
 }
 
 pub struct TreeWalk<'a, T: TreeModel> {
     model: &'a T,
-    stack: Vec<(Option<T::Id>, T::Id)>,
+    stack: Vec<(Option<T::Id>, T::Id, usize)>,
 }
 
 impl<'a, T: TreeModel> TreeWalk<'a, T> {
     pub fn forest(model: &'a T) -> Self {
         let mut stack = Vec::with_capacity(model.size_hint().min(1024));
-        stack.extend(model.roots().map(|id| (None, id)));
+        stack.extend(model.roots().map(|id| (None, id, 0)));
         stack.reverse();
         Self { model, stack }
     }
@@ -24,7 +25,7 @@ impl<'a, T: TreeModel> TreeWalk<'a, T> {
     pub fn subtree(model: &'a T, parent: Option<T::Id>, root: T::Id) -> Self {
         Self {
             model,
-            stack: vec![(parent, root)],
+            stack: vec![(parent, root, 0)],
         }
     }
 }
@@ -34,19 +35,21 @@ impl<'a, T: TreeModel> Iterator for TreeWalk<'a, T> {
 
     #[inline]
     fn next(&mut self) -> Option<Self::Item> {
-        let (parent, id) = self.stack.pop()?;
+        let (parent, id, level) = self.stack.pop()?;
         let children = self.model.children(id);
+        let child_level = level.saturating_add(1);
         self.stack.extend(
             children
                 .loaded_slice()
                 .iter()
                 .rev()
                 .copied()
-                .map(|child| (Some(id), child)),
+                .map(|child| (Some(id), child, child_level)),
         );
         Some(TreeWalkNode {
             parent,
             id,
+            level,
             children,
         })
     }

@@ -195,6 +195,7 @@ impl<Id: Copy + Eq + Hash> TreeProjection<Id> {
 
         let mut roots: SmallVec<[Id; 8]> = model.roots().collect();
         Self::sort_ids(model, query.sort(), &mut roots);
+        let sorting = query.sort().is_enabled();
         let mut stack = Vec::with_capacity(model.size_hint().min(1024).max(roots.len()));
 
         match query.root_visibility() {
@@ -217,13 +218,16 @@ impl<Id: Copy + Eq + Hash> TreeProjection<Id> {
             }
 
             let children_state = model.children(frame.id);
-            let mut visible_children = match children_state {
-                TreeChildren::Loaded(children) => self.visible_children(query, children),
-                TreeChildren::Leaf | TreeChildren::Unloaded | TreeChildren::Loading => {
-                    SmallVec::new()
+            let mut children_buffer;
+            let visible_children = match children_state {
+                TreeChildren::Loaded(children) if filtering || sorting => {
+                    children_buffer = self.visible_children(query, children);
+                    Self::sort_ids(model, query.sort(), &mut children_buffer);
+                    children_buffer.as_slice()
                 }
+                TreeChildren::Loaded(children) => children,
+                TreeChildren::Leaf | TreeChildren::Unloaded | TreeChildren::Loading => &[],
             };
-            Self::sort_ids(model, query.sort(), &mut visible_children);
 
             let expansion = match children_state {
                 TreeChildren::Leaf => TreeExpansionState::Leaf,
@@ -268,7 +272,7 @@ impl<Id: Copy + Eq + Hash> TreeProjection<Id> {
             if expansion.is_expanded() {
                 Self::push_children(
                     &mut stack,
-                    &visible_children,
+                    visible_children,
                     Some(frame.id),
                     Some(index),
                     frame.level.saturating_add(1),
