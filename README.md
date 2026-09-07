@@ -1,5 +1,7 @@
 # tui-treelistview
 
+[🇺🇸 English](./README.md) · [🇷🇺 Русский](./README.ru.md)
+
 [![CI](https://github.com/hexqnt/tui-treelistview/actions/workflows/ci.yml/badge.svg)](https://github.com/hexqnt/tui-treelistview/actions/workflows/ci.yml)
 [![crates.io](https://img.shields.io/crates/v/tui-treelistview.svg)](https://crates.io/crates/tui-treelistview)
 [![docs.rs](https://docs.rs/tui-treelistview/badge.svg)](https://docs.rs/tui-treelistview)
@@ -77,9 +79,7 @@ Tab changes columns, Ctrl+Left/Right scrolls horizontally, and `q`/Esc exits.
 
 ## Benchmarks
 
-The Criterion suite covers balanced, deep, wide, and multi-root trees; projection cache hits and
-rebuilds; filtering and sorting; marks and deep selection; indexed-tree validation; and full,
-virtualized, and horizontally scrolled rendering.
+Criterion benchmarks cover projection, filtering, sorting, state operations, model validation, and rendering for trees of different shapes and sizes.
 
 ```bash
 cargo bench --bench perf
