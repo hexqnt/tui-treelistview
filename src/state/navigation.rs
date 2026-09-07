@@ -36,9 +36,7 @@ impl<Id: Copy + Eq + Hash> TreeListViewState<Id> {
 
     /// Selects the last row.
     pub fn select_last(&mut self) -> bool {
-        self.select_index(
-            (!self.projection.is_empty()).then_some(self.projection.len().saturating_sub(1)),
-        )
+        self.select_index(self.projection.len().checked_sub(1))
     }
 
     /// Selects the previous row, starting at the last row when nothing is selected.
@@ -139,12 +137,7 @@ impl<Id: Copy + Eq + Hash> TreeListViewState<Id> {
 
     /// Scrolls the viewport without changing selection.
     pub fn scroll_view_by(&mut self, amount: isize) -> bool {
-        let offset = if amount.is_negative() {
-            self.offset.saturating_sub(amount.unsigned_abs())
-        } else {
-            self.offset.saturating_add(amount.cast_unsigned())
-        };
-        self.set_offset(offset)
+        self.set_offset(self.offset.saturating_add_signed(amount))
     }
 
     #[must_use]
@@ -160,13 +153,7 @@ impl<Id: Copy + Eq + Hash> TreeListViewState<Id> {
     }
 
     pub const fn scroll_horizontal_by(&mut self, amount: i16) -> bool {
-        let offset = if amount.is_negative() {
-            self.horizontal_offset.saturating_sub(amount.unsigned_abs())
-        } else {
-            self.horizontal_offset
-                .saturating_add(amount.cast_unsigned())
-        };
-        self.set_horizontal_offset(offset)
+        self.set_horizontal_offset(self.horizontal_offset.saturating_add_signed(amount))
     }
 
     pub(crate) fn clamp_horizontal_offset(&mut self, maximum: u16) {

@@ -168,34 +168,23 @@ impl<Id: Copy + Eq + Hash> TreeListViewState<Id> {
         old_path: Option<&OccurrencePath<Id>>,
         fallback: TreeSelectionFallback,
     ) {
-        if let Some(path) = old_path {
-            if let Some(index) = self.projection.index_of_path(path) {
-                self.select_rebuilt_row(Some(index));
-                return;
-            }
-
-            if let Some(index) = self
-                .selected
-                .and_then(|selected| self.projection.index_of(selected))
-            {
-                self.select_rebuilt_row(Some(index));
-                return;
-            }
-
-            if matches!(fallback, TreeSelectionFallback::ParentThenNearest) {
-                for end in (1..path.len()).rev() {
-                    if let Some(index) = self.projection.index_of_path_prefix(path, end) {
-                        self.select_rebuilt_row(Some(index));
-                        return;
-                    }
-                }
-            }
-        } else if let Some(index) = self
-            .selected
-            .and_then(|selected| self.projection.index_of(selected))
-        {
+        let restored = old_path
+            .and_then(|path| self.projection.index_of_path(path))
+            .or_else(|| self.selected.and_then(|id| self.projection.index_of(id)));
+        if let Some(index) = restored {
             self.select_rebuilt_row(Some(index));
             return;
+        }
+
+        if matches!(fallback, TreeSelectionFallback::ParentThenNearest)
+            && let Some(path) = old_path
+        {
+            for end in (1..path.len()).rev() {
+                if let Some(index) = self.projection.index_of_path_prefix(path, end) {
+                    self.select_rebuilt_row(Some(index));
+                    return;
+                }
+            }
         }
 
         let selected_row = match fallback {
@@ -218,8 +207,5 @@ impl<Id: Copy + Eq + Hash> TreeListViewState<Id> {
 
     fn clamp_offsets(&mut self) {
         self.offset = self.offset.min(self.projection.len().saturating_sub(1));
-        if self.projection.is_empty() {
-            self.offset = 0;
-        }
     }
 }

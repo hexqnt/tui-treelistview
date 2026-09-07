@@ -117,7 +117,7 @@ where
         revision: TreeRevision,
     ) -> Result<Self, IndexedTreeError> {
         let roots: SmallVec<[usize; 1]> = roots.into_iter().collect();
-        let mut indegree = vec![0_usize; children.len()];
+        let mut has_parent = vec![false; children.len()];
         let mut root_seen = vec![false; children.len()];
         for root in roots.iter().copied() {
             let Some(seen) = root_seen.get_mut(root) else {
@@ -131,40 +131,32 @@ where
 
         for (parent, node_children) in children.iter().enumerate() {
             for &child in node_children.as_ref() {
-                let Some(value) = indegree.get_mut(child) else {
+                let Some(seen) = has_parent.get_mut(child) else {
                     return Err(IndexedTreeError::InvalidChild { parent, child });
                 };
-                *value = value.saturating_add(1);
-                if *value > 1 {
+                if *seen {
                     return Err(IndexedTreeError::MultipleParents(child));
                 }
+                *seen = true;
             }
         }
-        if let Some(root) = roots.iter().copied().find(|root| indegree[*root] != 0) {
+        if let Some(root) = roots.iter().copied().find(|root| has_parent[*root]) {
             return Err(IndexedTreeError::RootHasParent(root));
         }
-        if let Some(root) = indegree
+        if let Some(root) = has_parent
             .iter()
-            .enumerate()
-            .find_map(|(id, degree)| (*degree == 0 && !root_seen[id]).then_some(id))
+            .zip(&root_seen)
+            .position(|(&has_parent, &is_root)| !has_parent && !is_root)
         {
             return Err(IndexedTreeError::MissingRoot(root));
         }
 
-        let mut queue: Vec<_> = indegree
-            .iter()
-            .enumerate()
-            .filter_map(|(id, degree)| (*degree == 0).then_some(id))
-            .collect();
+        // При единственном родителе цикл не достижим из корней: достаточно посчитать достижимые узлы.
+        let mut stack = roots.clone();
         let mut processed = 0;
-        while let Some(id) = queue.pop() {
+        while let Some(id) = stack.pop() {
             processed += 1;
-            for &child in children[id].as_ref() {
-                indegree[child] -= 1;
-                if indegree[child] == 0 {
-                    queue.push(child);
-                }
-            }
+            stack.extend_from_slice(children[id].as_ref());
         }
         if processed != children.len() {
             return Err(IndexedTreeError::Cycle);
@@ -204,6 +196,59 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn indexed_tree_reports_invalid_structure() {
+        let cases = [
+            (vec![1], vec![vec![]], IndexedTreeError::InvalidRoot(1)),
+            (vec![0, 0], vec![vec![]], IndexedTreeError::DuplicateRoot(0)),
+            (vec![], vec![vec![]], IndexedTreeError::MissingRoot(0)),
+            (
+                vec![0],
+                vec![vec![1]],
+                IndexedTreeError::InvalidChild {
+                    parent: 0,
+                    child: 1,
+                },
+            ),
+            (
+                vec![0, 1],
+                vec![vec![1], vec![]],
+                IndexedTreeError::RootHasParent(1),
+            ),
+            (
+                vec![0],
+                vec![vec![1, 1], vec![]],
+                IndexedTreeError::MultipleParents(1),
+            ),
+            (
+                vec![0],
+                vec![vec![], vec![2], vec![1]],
+                IndexedTreeError::Cycle,
+            ),
+            (vec![], vec![vec![0]], IndexedTreeError::Cycle),
+        ];
+        for (roots, children, expected) in cases {
+            assert_eq!(
+                IndexedTree::new(roots, &children, TreeRevision::INITIAL).err(),
+                Some(expected)
+            );
+        }
+    }
+
+    #[test]
+    fn indexed_tree_accepts_empty_and_multiple_root_forests() {
+        let empty: [Vec<usize>; 0] = [];
+        let tree = IndexedTree::new([], &empty, TreeRevision::INITIAL).expect("valid empty forest");
+        assert_eq!(tree.size_hint(), 0);
+        assert_eq!(tree.roots().count(), 0);
+
+        let children = [vec![2, 3], vec![], vec![], vec![]];
+        let tree = IndexedTree::new([1, 0], &children, TreeRevision::INITIAL)
+            .expect("valid forest with multiple roots");
+        assert_eq!(tree.roots().collect::<Vec<_>>(), [1, 0]);
+        assert_eq!(tree.children(0).loaded_slice(), &[2, 3]);
+    }
 
     #[test]
     fn indexed_tree_rejects_shared_nodes_and_cycles() {
