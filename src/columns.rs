@@ -352,7 +352,6 @@ fn grow_towards(
 
         let active = u16::try_from(active).unwrap_or(u16::MAX);
         let share = (*remaining / active).max(1);
-        let mut spent = 0_u16;
         for (width, column) in widths.iter_mut().zip(columns) {
             if *remaining == 0 {
                 break;
@@ -363,10 +362,6 @@ fn grow_towards(
                 .min(*remaining);
             *width = width.saturating_add(add);
             *remaining = remaining.saturating_sub(add);
-            spent = spent.saturating_add(add);
-        }
-        if spent == 0 {
-            return;
         }
     }
 }

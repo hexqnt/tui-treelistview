@@ -41,25 +41,12 @@ impl<Id: Copy + Eq + Hash> TreeListViewState<Id> {
 
     /// Selects the previous row, starting at the last row when nothing is selected.
     pub fn select_prev(&mut self) -> bool {
-        if self.projection.is_empty() {
-            return self.set_selection(None);
-        }
-        let index = self.selected_index().map_or_else(
-            || self.projection.len().saturating_sub(1),
-            |index| index.saturating_sub(1),
-        );
-        self.select_index(Some(index))
+        self.select_index(Step::Previous.index(self.selected_row, self.visible_len()))
     }
 
     /// Selects the next row, starting at the first row when nothing is selected.
     pub fn select_next(&mut self) -> bool {
-        if self.projection.is_empty() {
-            return self.set_selection(None);
-        }
-        let index = self.selected_index().map_or(0, |index| {
-            index.saturating_add(1).min(self.projection.len() - 1)
-        });
-        self.select_index(Some(index))
+        self.select_index(Step::Next.index(self.selected_row, self.visible_len()))
     }
 
     /// Selects the visible parent.
@@ -176,25 +163,13 @@ impl<Id: Copy + Eq + Hash> TreeListViewState<Id> {
     }
 
     pub fn select_column_left(&mut self, column_count: usize) -> bool {
-        if column_count == 0 {
-            return self.select_column(None, 0);
-        }
-        let column = self
-            .selected_column
-            .filter(|column| *column < column_count)
-            .map_or(column_count - 1, |column| column.saturating_sub(1));
-        self.select_column(Some(column), column_count)
+        let column = self.selected_column.filter(|column| *column < column_count);
+        self.select_column(Step::Previous.index(column, column_count), column_count)
     }
 
     pub fn select_column_right(&mut self, column_count: usize) -> bool {
-        if column_count == 0 {
-            return self.select_column(None, 0);
-        }
-        let column = self
-            .selected_column
-            .filter(|column| *column < column_count)
-            .map_or(0, |column| column.saturating_add(1).min(column_count - 1));
-        self.select_column(Some(column), column_count)
+        let column = self.selected_column.filter(|column| *column < column_count);
+        self.select_column(Step::Next.index(column, column_count), column_count)
     }
 
     pub(crate) fn ensure_selection_visible(
@@ -263,5 +238,21 @@ impl<Id: Copy + Eq + Hash> TreeListViewState<Id> {
             self.selection_needs_visibility = selected.is_some();
         }
         changed
+    }
+}
+
+#[derive(Clone, Copy)]
+enum Step {
+    Previous,
+    Next,
+}
+
+impl Step {
+    fn index(self, index: Option<usize>, count: usize) -> Option<usize> {
+        let last = count.checked_sub(1)?;
+        Some(match self {
+            Self::Previous => index.map_or(last, |index| index.saturating_sub(1)),
+            Self::Next => index.map_or(0, |index| index.saturating_add(1).min(last)),
+        })
     }
 }

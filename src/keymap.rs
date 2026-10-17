@@ -20,9 +20,7 @@ pub struct TreeKeyBindings {
 impl TreeKeyBindings {
     #[must_use]
     pub const fn new() -> Self {
-        Self {
-            profile: KeymapProfile::Default,
-        }
+        Self::with_profile(KeymapProfile::Default)
     }
 
     #[must_use]
@@ -107,63 +105,49 @@ impl TreeKeyBindings {
     }
 
     const fn common<C>(key: KeyEvent) -> Option<TreeAction<C>> {
-        match (key.code, key.modifiers) {
+        Some(match (key.code, key.modifiers) {
             (KeyCode::Char(' '), KeyModifiers::NONE) => {
-                Some(TreeAction::View(TreeViewAction::ToggleRecursive))
+                TreeAction::View(TreeViewAction::ToggleRecursive)
             }
-            (KeyCode::Enter, KeyModifiers::NONE) => {
-                Some(TreeAction::View(TreeViewAction::ToggleNode))
-            }
+            (KeyCode::Enter, KeyModifiers::NONE) => TreeAction::View(TreeViewAction::ToggleNode),
             (KeyCode::Char('E'), KeyModifiers::SHIFT | KeyModifiers::NONE) => {
-                Some(TreeAction::View(TreeViewAction::ExpandAll))
+                TreeAction::View(TreeViewAction::ExpandAll)
             }
             (KeyCode::Char('C'), KeyModifiers::SHIFT | KeyModifiers::NONE) => {
-                Some(TreeAction::View(TreeViewAction::CollapseAll))
+                TreeAction::View(TreeViewAction::CollapseAll)
             }
             (KeyCode::Char('a' | '+'), KeyModifiers::NONE) => {
-                Some(TreeAction::Edit(TreeEditAction::AddChild))
+                TreeAction::Edit(TreeEditAction::AddChild)
             }
-            (KeyCode::Char('e'), KeyModifiers::NONE) => {
-                Some(TreeAction::Edit(TreeEditAction::Rename))
-            }
+            (KeyCode::Char('e'), KeyModifiers::NONE) => TreeAction::Edit(TreeEditAction::Rename),
             (KeyCode::Delete | KeyCode::Char('d'), KeyModifiers::NONE) => {
-                Some(TreeAction::Edit(TreeEditAction::Detach))
+                TreeAction::Edit(TreeEditAction::Detach)
             }
             (KeyCode::Char('D'), KeyModifiers::SHIFT | KeyModifiers::NONE) => {
-                Some(TreeAction::Edit(TreeEditAction::Delete))
+                TreeAction::Edit(TreeEditAction::Delete)
             }
-            (KeyCode::Char('y'), KeyModifiers::NONE) => {
-                Some(TreeAction::Edit(TreeEditAction::Yank))
-            }
-            (KeyCode::Char('p'), KeyModifiers::NONE) => {
-                Some(TreeAction::Edit(TreeEditAction::Paste))
-            }
+            (KeyCode::Char('y'), KeyModifiers::NONE) => TreeAction::Edit(TreeEditAction::Yank),
+            (KeyCode::Char('p'), KeyModifiers::NONE) => TreeAction::Edit(TreeEditAction::Paste),
             (KeyCode::Char('g'), KeyModifiers::NONE) => {
-                Some(TreeAction::View(TreeViewAction::ToggleGuides))
+                TreeAction::View(TreeViewAction::ToggleGuides)
             }
             (KeyCode::Char('m' | 'M'), KeyModifiers::NONE | KeyModifiers::SHIFT) => {
-                Some(TreeAction::View(TreeViewAction::ToggleMark))
+                TreeAction::View(TreeViewAction::ToggleMark)
             }
-            (KeyCode::Home, KeyModifiers::NONE) => {
-                Some(TreeAction::View(TreeViewAction::SelectFirst))
-            }
-            (KeyCode::End, KeyModifiers::NONE) => {
-                Some(TreeAction::View(TreeViewAction::SelectLast))
-            }
+            (KeyCode::Home, KeyModifiers::NONE) => TreeAction::View(TreeViewAction::SelectFirst),
+            (KeyCode::End, KeyModifiers::NONE) => TreeAction::View(TreeViewAction::SelectLast),
             (KeyCode::Tab, KeyModifiers::NONE) => {
-                Some(TreeAction::View(TreeViewAction::SelectColumnRight))
+                TreeAction::View(TreeViewAction::SelectColumnRight)
             }
             (KeyCode::BackTab, KeyModifiers::SHIFT | KeyModifiers::NONE) => {
-                Some(TreeAction::View(TreeViewAction::SelectColumnLeft))
+                TreeAction::View(TreeViewAction::SelectColumnLeft)
             }
-            (KeyCode::PageUp, KeyModifiers::NONE) => {
-                Some(TreeAction::View(TreeViewAction::ScrollViewUp))
-            }
+            (KeyCode::PageUp, KeyModifiers::NONE) => TreeAction::View(TreeViewAction::ScrollViewUp),
             (KeyCode::PageDown, KeyModifiers::NONE) => {
-                Some(TreeAction::View(TreeViewAction::ScrollViewDown))
+                TreeAction::View(TreeViewAction::ScrollViewDown)
             }
-            _ => None,
-        }
+            _ => return None,
+        })
     }
 }
 

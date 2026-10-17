@@ -1,6 +1,6 @@
 use std::hash::Hash;
 
-use rustc_hash::{FxBuildHasher, FxHashMap, FxHashSet};
+use rustc_hash::{FxBuildHasher, FxHashMap};
 use smallvec::SmallVec;
 
 use crate::context::{TreeExpansionState, TreeMatchState};
@@ -105,12 +105,17 @@ impl PolicyStamp {
     }
 }
 
+struct FilterMatch {
+    visible: bool,
+    // Прямое совпадение сохраняется, даже если фильтр иначе ответит для следующего вхождения DAG.
+    direct: bool,
+}
+
 /// A cached flat projection shared by navigation and rendering.
 pub struct TreeProjection<Id> {
     nodes: Vec<ProjectedNode<Id>>,
     index: FxHashMap<Id, usize>,
-    filter_memo: FxHashMap<Id, bool>,
-    direct_matches: FxHashSet<Id>,
+    filter_matches: FxHashMap<Id, FilterMatch>,
     stamp: Option<ProjectionStamp>,
 }
 
@@ -119,8 +124,7 @@ impl<Id: Copy + Eq + Hash> TreeProjection<Id> {
         Self {
             nodes: Vec::with_capacity(capacity),
             index: FxHashMap::with_capacity_and_hasher(capacity, FxBuildHasher),
-            filter_memo: FxHashMap::with_capacity_and_hasher(capacity, FxBuildHasher),
-            direct_matches: FxHashSet::with_capacity_and_hasher(capacity, FxBuildHasher),
+            filter_matches: FxHashMap::default(),
             stamp: None,
         }
     }
@@ -183,20 +187,22 @@ impl<Id: Copy + Eq + Hash> TreeProjection<Id> {
     {
         self.nodes.clear();
         self.index.clear();
-        self.reserve(model.size_hint());
+        let hint = model.size_hint();
+        self.nodes.reserve(hint);
+        self.index.reserve(hint);
 
         let filtering = matches!(query.filter_config(), TreeFilterConfig::Enabled { .. });
+        self.filter_matches.clear();
         if filtering {
+            self.filter_matches.reserve(hint);
             self.compute_filter_matches(model, query.filter());
-        } else {
-            self.filter_memo.clear();
-            self.direct_matches.clear();
         }
 
         let mut roots: SmallVec<[Id; 8]> = model.roots().collect();
         Self::sort_ids(model, query.sort(), &mut roots);
         let sorting = query.sort().is_enabled();
         let mut stack = Vec::with_capacity(model.size_hint().min(1024).max(roots.len()));
+        let mut children_buffer = SmallVec::new();
 
         match query.root_visibility() {
             TreeRootVisibility::Visible => {
@@ -204,26 +210,35 @@ impl<Id: Copy + Eq + Hash> TreeProjection<Id> {
             }
             TreeRootVisibility::Hidden => {
                 for root in roots.iter().rev().copied() {
-                    let mut children =
-                        self.visible_children(query, model.children(root).loaded_slice());
-                    Self::sort_ids(model, query.sort(), &mut children);
-                    Self::push_children(&mut stack, &children, Some(root), None, 0);
+                    let children = self.visible_children(
+                        model,
+                        query,
+                        model.children(root).loaded_slice(),
+                        &mut children_buffer,
+                    );
+                    Self::push_children(&mut stack, children, Some(root), None, 0);
                 }
             }
         }
 
         while let Some(frame) = stack.pop() {
-            if filtering && !self.filter_memo.get(&frame.id).copied().unwrap_or(false) {
-                continue;
-            }
+            let match_state = if filtering {
+                match self.filter_matches.get(&frame.id) {
+                    Some(FilterMatch {
+                        visible: true,
+                        direct: true,
+                    }) => TreeMatchState::Direct,
+                    Some(FilterMatch { visible: true, .. }) => TreeMatchState::Ancestor,
+                    _ => continue,
+                }
+            } else {
+                TreeMatchState::Unfiltered
+            };
 
             let children_state = model.children(frame.id);
-            let mut children_buffer;
             let visible_children = match children_state {
                 TreeChildren::Loaded(children) if filtering || sorting => {
-                    children_buffer = self.visible_children(query, children);
-                    Self::sort_ids(model, query.sort(), &mut children_buffer);
-                    children_buffer.as_slice()
+                    self.visible_children(model, query, children, &mut children_buffer)
                 }
                 TreeChildren::Loaded(children) => children,
                 TreeChildren::Leaf | TreeChildren::Unloaded | TreeChildren::Loading => &[],
@@ -248,14 +263,6 @@ impl<Id: Copy + Eq + Hash> TreeProjection<Id> {
                     }
                 },
             };
-            let match_state = if !filtering {
-                TreeMatchState::Unfiltered
-            } else if self.direct_matches.contains(&frame.id) {
-                TreeMatchState::Direct
-            } else {
-                TreeMatchState::Ancestor
-            };
-
             let index = self.nodes.len();
             self.nodes.push(ProjectedNode {
                 id: frame.id,
@@ -301,30 +308,38 @@ impl<Id: Copy + Eq + Hash> TreeProjection<Id> {
         }
     }
 
-    fn reserve(&mut self, hint: usize) {
-        if hint == 0 {
-            return;
-        }
-        reserve_to(&mut self.nodes, hint);
-        reserve_map_to(&mut self.index, hint);
-        reserve_map_to(&mut self.filter_memo, hint);
-        let extra = hint.saturating_sub(self.direct_matches.len());
-        self.direct_matches.reserve(extra);
-    }
-
-    fn visible_children<F, S>(
+    #[inline]
+    fn visible_children<'a, T, F, S>(
         &self,
+        model: &T,
         query: &TreeQuery<F, S>,
-        children: &[Id],
-    ) -> SmallVec<[Id; 8]> {
-        match query.filter_config() {
-            TreeFilterConfig::Disabled => children.iter().copied().collect(),
-            TreeFilterConfig::Enabled { .. } => children
-                .iter()
-                .copied()
-                .filter(|child| self.filter_memo.get(child).copied().unwrap_or(false))
-                .collect(),
+        children: &'a [Id],
+        buffer: &'a mut SmallVec<[Id; 8]>,
+    ) -> &'a [Id]
+    where
+        T: TreeModel<Id = Id>,
+        S: TreeSort<T>,
+    {
+        let filtering = matches!(query.filter_config(), TreeFilterConfig::Enabled { .. });
+        let sorting = query.sort().is_enabled();
+        if !filtering && !sorting {
+            return children;
         }
+
+        buffer.clear();
+        if filtering {
+            buffer.extend(children.iter().copied().filter(|child| {
+                self.filter_matches
+                    .get(child)
+                    .is_some_and(|filter_match| filter_match.visible)
+            }));
+        } else {
+            buffer.extend_from_slice(children);
+        }
+        if sorting {
+            buffer.sort_by(|left, right| query.sort().compare(model, *left, *right));
+        }
+        buffer
     }
 
     fn compute_filter_matches<T, F>(&mut self, model: &T, filter: &F)
@@ -332,18 +347,21 @@ impl<Id: Copy + Eq + Hash> TreeProjection<Id> {
         T: TreeModel<Id = Id>,
         F: TreeFilter<T>,
     {
-        self.filter_memo.clear();
-        self.direct_matches.clear();
         for node in TreePostorder::forest(model) {
             let direct = filter.is_match(model, node.id);
-            if direct {
-                self.direct_matches.insert(node.id);
-            }
-            let descendant = node
-                .children
-                .iter()
-                .any(|child| self.filter_memo.get(child).copied().unwrap_or(false));
-            self.filter_memo.insert(node.id, direct || descendant);
+            let descendant = node.children.iter().any(|child| {
+                self.filter_matches
+                    .get(child)
+                    .is_some_and(|filter_match| filter_match.visible)
+            });
+            let visible = direct || descendant;
+            self.filter_matches
+                .entry(node.id)
+                .and_modify(|filter_match| {
+                    filter_match.visible = visible;
+                    filter_match.direct |= direct;
+                })
+                .or_insert(FilterMatch { visible, direct });
         }
     }
 
@@ -448,10 +466,99 @@ struct ProjectionFrame<Id> {
     is_last_sibling: bool,
 }
 
-fn reserve_to<T>(values: &mut Vec<T>, capacity: usize) {
-    values.reserve(capacity.saturating_sub(values.len()));
-}
+#[cfg(test)]
+mod tests {
+    use std::cell::{Cell, RefCell};
+    use std::cmp::Ordering;
 
-fn reserve_map_to<K: Eq + Hash, V>(values: &mut FxHashMap<K, V>, capacity: usize) {
-    values.reserve(capacity.saturating_sub(values.len()));
+    use crate::adapters::TreeModelRef;
+
+    use super::*;
+
+    #[test]
+    fn repeated_dag_matches_keep_the_last_visibility_and_any_direct_match() {
+        for children in [
+            [&[1, 2][..], &[3], &[3], &[4], &[]],
+            [&[1, 2][..], &[3], &[3], &[], &[]],
+        ] {
+            let model = TreeModelRef::new(
+                &[0],
+                |id| TreeChildren::loaded(children[id]),
+                TreeRevision::INITIAL,
+            );
+            let calls = RefCell::new(Vec::new());
+            let query = TreeQuery::new().with_filter(
+                |_: &_, id| {
+                    let repeated = calls.borrow().contains(&id);
+                    calls.borrow_mut().push(id);
+                    (id == 3 && !repeated) || (id == 4 && repeated)
+                },
+                TreeFilterConfig::enabled(),
+                TreeRevision::INITIAL,
+            );
+            let mut projection = TreeProjection::with_capacity(0);
+            projection.rebuild(&model, &query, TreeRevision::INITIAL, |_, _| false);
+
+            if children[3].is_empty() {
+                assert_eq!(*calls.borrow(), [3, 1, 3, 2, 0]);
+                assert_eq!(
+                    projection
+                        .nodes()
+                        .iter()
+                        .map(|node| node.id)
+                        .collect::<Vec<_>>(),
+                    [0, 1]
+                );
+            } else {
+                assert_eq!(*calls.borrow(), [4, 3, 1, 4, 3, 2, 0]);
+                assert_eq!(
+                    projection
+                        .nodes()
+                        .iter()
+                        .map(|node| node.id)
+                        .collect::<Vec<_>>(),
+                    [0, 1, 3, 4, 2, 3, 4]
+                );
+                assert_eq!(
+                    projection.get_by_id(3).map(ProjectedNode::match_state),
+                    Some(TreeMatchState::Direct)
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn hidden_roots_preserve_disabled_sort_policy_calls() {
+        struct DisabledSort<'a>(&'a Cell<usize>);
+
+        impl<T: TreeModel> TreeSort<T> for DisabledSort<'_> {
+            fn compare(&self, _: &T, _: T::Id, _: T::Id) -> Ordering {
+                panic!("disabled sort must not compare nodes");
+            }
+
+            fn is_enabled(&self) -> bool {
+                self.0.set(self.0.get() + 1);
+                false
+            }
+        }
+
+        let children = [&[2, 3][..], &[4, 5], &[], &[], &[], &[]];
+        let model = TreeModelRef::new(
+            &[0, 1],
+            |id| TreeChildren::loaded(children[id]),
+            TreeRevision::INITIAL,
+        );
+        for (visibility, expected_calls) in [
+            (TreeRootVisibility::Visible, 2),
+            (TreeRootVisibility::Hidden, 4),
+        ] {
+            let calls = Cell::new(0);
+            let query = TreeQuery::new()
+                .with_sort(DisabledSort(&calls), TreeRevision::INITIAL)
+                .with_root_visibility(visibility);
+            let mut projection = TreeProjection::with_capacity(0);
+            projection.rebuild(&model, &query, TreeRevision::INITIAL, |_, _| true);
+            assert_eq!(calls.get(), expected_calls);
+        }
+    }
 }

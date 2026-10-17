@@ -111,26 +111,7 @@ impl TreeSort<TestTree> for NumericOrder {
     }
 }
 
-#[derive(Clone, Debug)]
-struct EditableTree(TestTree);
-
-impl TreeModel for EditableTree {
-    type Id = usize;
-
-    fn roots(&self) -> impl Iterator<Item = Self::Id> + '_ {
-        self.0.roots.iter().copied()
-    }
-
-    fn children(&self, id: Self::Id) -> TreeChildren<'_, Self::Id> {
-        self.0.children(id)
-    }
-
-    fn revision(&self) -> TreeRevision {
-        self.0.revision
-    }
-}
-
-impl TreeEditor for EditableTree {
+impl TreeEditor for TestTree {
     type Error = &'static str;
 
     fn apply(
@@ -140,7 +121,7 @@ impl TreeEditor for EditableTree {
         match command {
             TreeEditCommand::Delete { nodes } => {
                 let node = *nodes.first().ok_or("empty delete")?;
-                self.0.remove(0, node);
+                self.remove(0, node);
                 Ok(TreeChangeSet {
                     removed: smallvec![node],
                     selection: TreeSelectionUpdate::Select(0),
@@ -148,18 +129,18 @@ impl TreeEditor for EditableTree {
                 })
             }
             TreeEditCommand::CreateChild { parent } => {
-                let child = self.0.children.len();
-                self.0.children.push(Children::Leaf);
-                match &mut self.0.children[parent] {
+                let child = self.children.len();
+                self.children.push(Children::Leaf);
+                match &mut self.children[parent] {
                     Children::Leaf => {
-                        self.0.children[parent] = Children::Loaded(vec![child]);
+                        self.children[parent] = Children::Loaded(vec![child]);
                     }
                     Children::Loaded(children) => children.push(child),
                     Children::Unloaded | Children::Loading => {
                         return Err("cannot create under an unloaded branch");
                     }
                 }
-                self.0.revision.advance();
+                self.revision.advance();
                 Ok(TreeChangeSet {
                     inserted: smallvec![child],
                     selection: TreeSelectionUpdate::Select(child),
@@ -538,6 +519,41 @@ fn marks_are_aggregated_without_recursion() {
 }
 
 #[test]
+fn mark_cache_skips_traversal_until_model_or_marks_change() {
+    let visits = std::cell::Cell::new(0);
+    let children = [&[1, 2][..], &[], &[]];
+    let mut state = TreeListViewState::new();
+    for revision in [TreeRevision::INITIAL, TreeRevision::new(1)] {
+        let model = TreeModelRef::new(
+            &[0],
+            |id| {
+                visits.set(visits.get() + 1);
+                TreeChildren::loaded(children[id])
+            },
+            revision,
+        );
+        let before = visits.get();
+        state.ensure_mark_states(&model);
+        assert_eq!(visits.get(), before + 3);
+        assert_eq!(state.mark_state(0), TreeMarkState::Unmarked);
+
+        for id in [1, 2] {
+            assert!(state.set_marked(id, true));
+            let before = visits.get();
+            state.ensure_mark_states(&model);
+            assert_eq!(visits.get(), before + 3);
+            let cached = visits.get();
+            assert!(!state.set_marked(id, true));
+            state.ensure_mark_states(&model);
+            assert_eq!(visits.get(), cached);
+        }
+        assert_eq!(state.mark_state(0), TreeMarkState::Marked);
+        assert!(state.clear_marks());
+        state.ensure_mark_states(&model);
+    }
+}
+
+#[test]
 fn projection_handles_a_very_deep_tree_iteratively() {
     const DEPTH: usize = 20_000;
     let mut children = Vec::with_capacity(DEPTH);
@@ -579,7 +595,7 @@ fn adapters_parse_invariants_once() {
 
 #[test]
 fn edit_changes_reconcile_selection_marks_and_expansion() {
-    let mut model = EditableTree(TestTree::forest());
+    let mut model = TestTree::forest();
     let query = TreeQuery::new();
     let mut state = TreeListViewState::new();
     assert!(state.select_by_id(&model, &query, 2));
@@ -603,7 +619,7 @@ fn edit_changes_reconcile_selection_marks_and_expansion() {
 
 #[test]
 fn editing_expands_the_path_to_an_explicitly_selected_result() {
-    let mut model = EditableTree(TestTree::forest());
+    let mut model = TestTree::forest();
     let query = TreeQuery::new();
     let mut state = TreeListViewState::new();
     assert!(state.select_by_id(&model, &query, 2));
@@ -663,4 +679,106 @@ fn column_navigation_recovers_from_a_stale_snapshot_index() {
     state.restore(snapshot);
     assert!(state.select_column_right(2));
     assert_eq!(state.selected_column(), Some(0));
+}
+
+#[test]
+fn row_and_column_navigation_preserve_boundaries_and_change_flags() {
+    let roots = [0, 1, 2, 3];
+    for (count, initial, previous, next) in [
+        (0, None, None, None),
+        (1, None, Some(0), Some(0)),
+        (1, Some(0), Some(0), Some(0)),
+        (4, None, Some(3), Some(0)),
+        (4, Some(0), Some(0), Some(1)),
+        (4, Some(1), Some(0), Some(2)),
+        (4, Some(2), Some(1), Some(3)),
+        (4, Some(3), Some(2), Some(3)),
+    ] {
+        let model = TreeModelRef::new(
+            &roots[..count],
+            |_| TreeChildren::Leaf,
+            TreeRevision::INITIAL,
+        );
+        let mut state = TreeListViewState::new();
+        state.ensure_projection(&model, &TreeQuery::new());
+        state.select_index(initial);
+        state.select_column(initial, count);
+        assert_eq!(state.select_prev(), initial != previous);
+        assert_eq!(state.select_column_left(count), initial != previous);
+        assert_eq!(state.selected_index(), previous);
+        assert_eq!(state.selected_column(), previous);
+
+        state.select_index(initial);
+        state.select_column(initial, count);
+        assert_eq!(state.select_next(), initial != next);
+        assert_eq!(state.select_column_right(count), initial != next);
+        assert_eq!(state.selected_index(), next);
+        assert_eq!(state.selected_column(), next);
+    }
+}
+
+#[test]
+fn bulk_expansion_preserves_lazy_branches_and_invalidates_only_on_change() {
+    let model = TestTree {
+        roots: vec![0],
+        children: vec![
+            Children::Loaded(vec![1, 2, 3, 4]),
+            Children::Loaded(vec![5]),
+            Children::Unloaded,
+            Children::Loading,
+            Children::Loaded(vec![]),
+            Children::Leaf,
+        ],
+        revision: TreeRevision::INITIAL,
+    };
+    let query = TreeQuery::new();
+    let mut state = TreeListViewState::new();
+    assert!(state.expand_all(&model));
+    assert!(state.ensure_projection(&model, &query));
+    assert!(!state.expand_all(&model));
+    assert!(!state.ensure_projection(&model, &query));
+    let mut paths: Vec<_> = state.expanded_paths().collect();
+    paths.sort_unstable();
+    assert_eq!(paths, [(None, 0), (Some(0), 1)]);
+
+    for id in [2, 3, 4] {
+        assert!(state.set_expanded(id, Some(0), true));
+    }
+    assert!(state.set_expanded(5, Some(1), true));
+    state.select_first();
+    assert_eq!(
+        state.handle_action(
+            &model,
+            &query,
+            &columns(),
+            TreeAction::<()>::View(TreeViewAction::ToggleRecursive),
+        ),
+        TreeEvent::Changed
+    );
+    assert_eq!(state.expanded_paths().count(), 0);
+    assert_eq!(state.visible_ids().collect::<Vec<_>>(), [0]);
+    assert!(!state.collapse_all());
+    assert!(!state.ensure_projection(&model, &query));
+
+    assert_eq!(
+        state.handle_action(
+            &model,
+            &query,
+            &columns(),
+            TreeAction::<()>::View(TreeViewAction::ToggleRecursive),
+        ),
+        TreeEvent::Changed
+    );
+    assert_eq!(state.visible_ids().collect::<Vec<_>>(), [0, 1, 5, 2, 3, 4]);
+    assert!(!state.expand_all(&model));
+    assert!(!state.ensure_projection(&model, &query));
+    assert_eq!(
+        state.effective_expansion(2),
+        Some(TreeExpansionState::Unloaded)
+    );
+    assert_eq!(
+        state.effective_expansion(3),
+        Some(TreeExpansionState::Loading)
+    );
+    assert_eq!(state.effective_expansion(4), Some(TreeExpansionState::Leaf));
 }

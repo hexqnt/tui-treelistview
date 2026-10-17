@@ -8,12 +8,19 @@ use super::TreeListViewState;
 
 impl<Id: Copy + Eq + Hash> TreeListViewState<Id> {
     /// Rebuilds tri-state marks after the model or manual marks change.
+    #[inline]
     pub fn ensure_mark_states<T: TreeModel<Id = Id>>(&mut self, model: &T) {
         let stamp = (model.revision(), self.manual_marked.revision());
         if self.mark_stamp == Some(stamp) {
             return;
         }
 
+        self.rebuild_mark_states(model);
+        self.mark_stamp = Some(stamp);
+    }
+
+    // Обход вынесен отдельно, чтобы попадание в кэш не создавало стековый кадр перестроения.
+    fn rebuild_mark_states<T: TreeModel<Id = Id>>(&mut self, model: &T) {
         self.mark_states.clear();
         for node in TreePostorder::forest(model) {
             let mark = if self.manual_marked.contains(&node.id) {
@@ -47,13 +54,12 @@ impl<Id: Copy + Eq + Hash> TreeListViewState<Id> {
         for id in self.manual_marked.iter().copied() {
             self.mark_states.insert(id, TreeMarkState::Marked);
         }
-        self.mark_stamp = Some(stamp);
     }
 
     /// Returns an aggregated mark from the most recently computed cache.
     #[must_use]
     pub fn mark_state(&self, id: Id) -> TreeMarkState {
-        self.mark_state_cached(id)
+        self.mark_states.get(&id).copied().unwrap_or_default()
     }
 
     #[must_use]

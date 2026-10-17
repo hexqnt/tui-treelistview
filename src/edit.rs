@@ -24,7 +24,7 @@ impl<Id: PartialEq> TreeInsertPosition<Id> {
             Self::After(anchor) => siblings
                 .iter()
                 .position(|sibling| sibling == anchor)
-                .and_then(|index| index.checked_add(1)),
+                .map(|index| index + 1),
         }
     }
 }

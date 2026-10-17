@@ -221,14 +221,6 @@ impl<Id: Copy + Eq + Hash> TreeListViewState<Id> {
         self.draw_lines = draw;
     }
 
-    pub(crate) fn is_expanded(&self, parent: Option<Id>, id: Id) -> bool {
-        self.expanded.contains(&ExpansionPath::new(parent, id))
-    }
-
-    pub(crate) fn mark_state_cached(&self, id: Id) -> TreeMarkState {
-        self.mark_states.get(&id).copied().unwrap_or_default()
-    }
-
     pub(crate) fn selected_node(&self) -> Option<ProjectedNode<Id>> {
         let selected = self.selected?;
         self.selected_row

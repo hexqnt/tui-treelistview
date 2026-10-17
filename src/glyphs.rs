@@ -2,7 +2,6 @@ use std::borrow::Cow;
 
 use ratatui::text::{Line, Span};
 use ratatui::widgets::Cell;
-use smallvec::SmallVec;
 
 use crate::context::{TreeExpansionState, TreeRowContext};
 use crate::model::TreeModel;
@@ -115,8 +114,27 @@ pub fn tree_label_line<'a>(
     parts: TreeLabelPrefix<'a>,
     glyphs: &TreeGlyphs<'a>,
 ) -> Line<'a> {
-    let mut spans =
-        SmallVec::<[Span<'a>; 16]>::with_capacity(context.is_tail_stack.len().saturating_add(6));
+    let state_glyph = match context.node.expansion {
+        TreeExpansionState::Leaf => (context.level > 0).then_some(glyphs.leaf),
+        TreeExpansionState::Collapsed => Some(glyphs.collapsed),
+        TreeExpansionState::Expanded | TreeExpansionState::ForcedByFilter => Some(glyphs.expanded),
+        TreeExpansionState::Unloaded => Some(glyphs.unloaded),
+        TreeExpansionState::Loading => Some(glyphs.loading),
+    }
+    .filter(|glyph| !glyph.is_empty());
+    let prefix = parts.prefix.filter(|prefix| !prefix.is_empty());
+    let guide_count = if context.level == 0 {
+        0
+    } else if context.render.draw_lines {
+        context.is_tail_stack.len()
+    } else {
+        context.level
+    };
+    let label_spans = 2 * (usize::from(state_glyph.is_some()) + usize::from(prefix.is_some())) + 1;
+    let capacity = guide_count
+        .saturating_add(usize::from(guide_count > 0))
+        .saturating_add(label_spans);
+    let mut spans = Vec::with_capacity(capacity);
 
     if context.level > 0 {
         if context.render.draw_lines {
@@ -140,32 +158,19 @@ pub fn tree_label_line<'a>(
         }
     }
 
-    let state_glyph = match context.node.expansion {
-        TreeExpansionState::Leaf => (context.level > 0).then_some(glyphs.leaf),
-        TreeExpansionState::Collapsed => Some(glyphs.collapsed),
-        TreeExpansionState::Expanded | TreeExpansionState::ForcedByFilter => Some(glyphs.expanded),
-        TreeExpansionState::Unloaded => Some(glyphs.unloaded),
-        TreeExpansionState::Loading => Some(glyphs.loading),
-    };
-
-    if let Some(glyph) = state_glyph.filter(|glyph| !glyph.is_empty()) {
-        push_separator(&mut spans);
-        spans.push(Span::raw(glyph));
+    for part in state_glyph
+        .map(Cow::Borrowed)
+        .into_iter()
+        .chain(prefix)
+        .chain([parts.name])
+    {
+        if !spans.is_empty() {
+            spans.push(Span::raw(" "));
+        }
+        spans.push(Span::raw(part));
     }
-    if let Some(prefix) = parts.prefix.filter(|prefix| !prefix.is_empty()) {
-        push_separator(&mut spans);
-        spans.push(Span::raw(prefix));
-    }
-    push_separator(&mut spans);
-    spans.push(Span::raw(parts.name));
 
-    Line::from(spans.into_vec())
-}
-
-fn push_separator(spans: &mut SmallVec<[Span<'_>; 16]>) {
-    if !spans.is_empty() {
-        spans.push(Span::raw(" "));
-    }
+    Line::from(spans)
 }
 
 /// Wraps [`tree_label_line`] in a table cell.
@@ -222,12 +227,104 @@ mod tests {
     }
 
     #[test]
-    fn renders_lazy_states() {
-        let unloaded = tree_label_line(
-            &context(0, &[], TreeExpansionState::Unloaded),
-            TreeLabelPrefix::borrowed("remote"),
+    fn renders_every_expansion_state_for_both_glyph_sets() {
+        for (expansion, unicode, ascii) in [
+            (TreeExpansionState::Leaf, "node", "node"),
+            (TreeExpansionState::Collapsed, "▶ node", "> node"),
+            (TreeExpansionState::Expanded, "▼ node", "v node"),
+            (TreeExpansionState::ForcedByFilter, "▼ node", "v node"),
+            (TreeExpansionState::Unloaded, "◇ node", "? node"),
+            (TreeExpansionState::Loading, "◌ node", "~ node"),
+        ] {
+            for (glyphs, expected) in [
+                (TreeGlyphs::unicode(), unicode),
+                (TreeGlyphs::ascii(), ascii),
+            ] {
+                assert_eq!(
+                    tree_label_line(
+                        &context(0, &[], expansion),
+                        TreeLabelPrefix::borrowed("node"),
+                        &glyphs,
+                    )
+                    .to_string(),
+                    expected
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn renders_icons_with_and_without_guides() {
+        let mut context = context(2, &[false, true], TreeExpansionState::Leaf);
+        for (draw_lines, expected) in [(true, "|  `-- * icon leaf"), (false, "       * icon leaf")]
+        {
+            context.render.draw_lines = draw_lines;
+            let line = tree_label_line(
+                &context,
+                TreeLabelPrefix {
+                    name: "leaf".into(),
+                    prefix: Some("icon".into()),
+                },
+                &TreeGlyphs::ascii(),
+            );
+            assert_eq!(line.to_string(), expected);
+        }
+    }
+
+    #[test]
+    fn empty_glyphs_and_icons_do_not_add_separators() {
+        let glyphs = TreeGlyphs {
+            collapsed: "",
+            ..TreeGlyphs::ascii()
+        };
+        for name in ["node", ""] {
+            let line = tree_label_line(
+                &context(0, &[], TreeExpansionState::Collapsed),
+                TreeLabelPrefix {
+                    name: name.into(),
+                    prefix: Some("".into()),
+                },
+                &glyphs,
+            );
+            assert_eq!(line.to_string(), name);
+        }
+    }
+
+    #[test]
+    fn applies_line_style_only_to_guides() {
+        let mut context = context(2, &[false, true], TreeExpansionState::Leaf);
+        context.line_style = Style::new().fg(ratatui::style::Color::Blue);
+        let line = tree_label_line(
+            &context,
+            TreeLabelPrefix::borrowed("leaf"),
             &TreeGlyphs::unicode(),
         );
-        assert_eq!(unloaded.to_string(), "◇ remote");
+        let (guides, label) = line.spans.split_at(2);
+        assert!(guides.iter().all(|span| span.style == context.line_style));
+        assert!(label.iter().all(|span| span.style == Style::default()));
+    }
+
+    #[test]
+    fn reserves_only_the_spans_that_are_rendered() {
+        for level in [0, 1, 16] {
+            let tails = vec![false; level];
+            for expansion in [TreeExpansionState::Leaf, TreeExpansionState::Collapsed] {
+                let mut context = context(level, &tails, expansion);
+                for draw_lines in [false, true] {
+                    context.render.draw_lines = draw_lines;
+                    for prefix in [None, Some(""), Some("icon")] {
+                        let line = tree_label_line(
+                            &context,
+                            TreeLabelPrefix {
+                                name: "node".into(),
+                                prefix: prefix.map(Cow::Borrowed),
+                            },
+                            &TreeGlyphs::unicode(),
+                        );
+                        assert_eq!(line.spans.capacity(), line.spans.len());
+                    }
+                }
+            }
+        }
     }
 }

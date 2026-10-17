@@ -2,6 +2,7 @@ use criterion::{criterion_group, criterion_main};
 
 mod adapters;
 mod fixture;
+mod glyphs;
 mod projection;
 mod render;
 mod state;
@@ -21,5 +22,6 @@ criterion_group!(
     render::deep,
     render::horizontal,
     render::end_to_end,
+    glyphs::labels,
 );
 criterion_main!(benches);

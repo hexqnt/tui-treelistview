@@ -39,7 +39,7 @@ impl<Id: Copy + Eq + Hash> TreeListViewState<Id> {
             query.selection_fallback(),
         );
         self.selection_needs_visibility = self.selected.is_some();
-        self.clamp_offsets();
+        self.offset = self.offset.min(self.projection.len().saturating_sub(1));
         true
     }
 
@@ -55,8 +55,7 @@ impl<Id: Copy + Eq + Hash> TreeListViewState<Id> {
         }
         self.ensure_projection(model, query);
         if let Some(index) = self.projection.index_of(id) {
-            self.selected = Some(id);
-            self.selected_row = Some(index);
+            self.select_index(Some(index));
             self.selection_needs_visibility = true;
             true
         } else {
@@ -97,17 +96,7 @@ impl<Id: Copy + Eq + Hash> TreeListViewState<Id> {
 
     /// Expands every loaded branch in the forest.
     pub fn expand_all<T: TreeModel<Id = Id>>(&mut self, model: &T) -> bool {
-        self.expanded.mutate(|expanded| {
-            let mut changed = false;
-            for node in TreeWalk::forest(model) {
-                if let TreeChildren::Loaded(children) = node.children
-                    && !children.is_empty()
-                {
-                    changed |= expanded.insert(ExpansionPath::new(node.parent, node.id));
-                }
-            }
-            changed
-        })
+        self.set_walk_expanded(TreeWalk::forest(model), true)
     }
 
     /// Collapses every branch.
@@ -124,7 +113,7 @@ impl<Id: Copy + Eq + Hash> TreeListViewState<Id> {
     /// Returns persisted expansion state rather than filter-forced state.
     #[must_use]
     pub fn node_is_expanded(&self, id: Id, parent: Option<Id>) -> bool {
-        self.is_expanded(parent, id)
+        self.expanded.contains(&ExpansionPath::new(parent, id))
     }
 
     /// Returns the effective expansion state of a visible node.
@@ -145,9 +134,17 @@ impl<Id: Copy + Eq + Hash> TreeListViewState<Id> {
         parent: Option<Id>,
         expand: bool,
     ) -> bool {
+        self.set_walk_expanded(TreeWalk::subtree(model, parent, root), expand)
+    }
+
+    fn set_walk_expanded<T: TreeModel<Id = Id>>(
+        &mut self,
+        nodes: TreeWalk<'_, T>,
+        expand: bool,
+    ) -> bool {
         self.expanded.mutate(|expanded| {
             let mut changed = false;
-            for node in TreeWalk::subtree(model, parent, root) {
+            for node in nodes {
                 let path = ExpansionPath::new(node.parent, node.id);
                 if expand {
                     if matches!(node.children, TreeChildren::Loaded(children) if !children.is_empty())
@@ -172,7 +169,7 @@ impl<Id: Copy + Eq + Hash> TreeListViewState<Id> {
             .and_then(|path| self.projection.index_of_path(path))
             .or_else(|| self.selected.and_then(|id| self.projection.index_of(id)));
         if let Some(index) = restored {
-            self.select_rebuilt_row(Some(index));
+            self.select_index(Some(index));
             return;
         }
 
@@ -181,7 +178,7 @@ impl<Id: Copy + Eq + Hash> TreeListViewState<Id> {
         {
             for end in (1..path.len()).rev() {
                 if let Some(index) = self.projection.index_of_path_prefix(path, end) {
-                    self.select_rebuilt_row(Some(index));
+                    self.select_index(Some(index));
                     return;
                 }
             }
@@ -195,17 +192,6 @@ impl<Id: Copy + Eq + Hash> TreeListViewState<Id> {
                     self.projection.nodes().get(index).map(|_| index)
                 }),
         };
-        self.select_rebuilt_row(selected_row);
-    }
-
-    fn select_rebuilt_row(&mut self, selected_row: Option<usize>) {
-        self.selected = selected_row
-            .and_then(|index| self.projection.nodes().get(index))
-            .map(|node| node.id());
-        self.selected_row = selected_row;
-    }
-
-    fn clamp_offsets(&mut self) {
-        self.offset = self.offset.min(self.projection.len().saturating_sub(1));
+        self.select_index(selected_row);
     }
 }

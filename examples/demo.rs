@@ -19,6 +19,8 @@ use tui_treelistview::{
     TreeRevision, TreeRowContext, TreeSelectionUpdate,
 };
 
+const DATETIME_FORMAT: &str = "%Y-%m-%d %H:%M:%S";
+
 struct Node {
     name: String,
     parent: Option<usize>,
@@ -61,7 +63,7 @@ impl FsModel {
             parent: Some(parent),
             children: Vec::new(),
             size: "-".to_string(),
-            perms: placeholder_permissions(false),
+            perms: "----------".to_string(),
             modified: now_string(),
             alive: true,
         };
@@ -429,25 +431,13 @@ fn format_modified(metadata: &fs::Metadata) -> String {
         |_| "-".to_string(),
         |time| {
             let datetime: DateTime<Local> = DateTime::from(time);
-            datetime.format("%Y-%m-%d %H:%M:%S").to_string()
+            datetime.format(DATETIME_FORMAT).to_string()
         },
     )
 }
 
 fn now_string() -> String {
-    Local::now().format("%Y-%m-%d %H:%M:%S").to_string()
-}
-
-fn placeholder_permissions(is_dir: bool) -> String {
-    if is_dir {
-        "d---------".to_string()
-    } else {
-        "----------".to_string()
-    }
-}
-
-fn expand_all(state: &mut TreeListViewState<usize>, model: &FsModel) {
-    let _ = state.expand_all(model);
+    Local::now().format(DATETIME_FORMAT).to_string()
 }
 
 fn render(
@@ -469,24 +459,20 @@ fn edit_command(
     clipboard: &mut Option<usize>,
 ) -> Option<TreeEditCommand<usize>> {
     match request {
-        TreeEditRequest::ReorderUp { node, parent } => {
+        TreeEditRequest::ReorderUp { node, parent }
+        | TreeEditRequest::ReorderDown { node, parent } => {
             let siblings = &model.nodes[parent].children;
             let index = siblings.iter().position(|id| *id == node)?;
-            let previous = index.checked_sub(1).and_then(|index| siblings.get(index))?;
+            let position = if matches!(request, TreeEditRequest::ReorderUp { .. }) {
+                let previous = index.checked_sub(1).and_then(|index| siblings.get(index))?;
+                TreeInsertPosition::Before(*previous)
+            } else {
+                TreeInsertPosition::After(*siblings.get(index + 1)?)
+            };
             Some(TreeEditCommand::Move {
                 nodes: smallvec![node],
                 parent,
-                position: TreeInsertPosition::Before(*previous),
-            })
-        }
-        TreeEditRequest::ReorderDown { node, parent } => {
-            let siblings = &model.nodes[parent].children;
-            let index = siblings.iter().position(|id| *id == node)?;
-            let next = siblings.get(index + 1)?;
-            Some(TreeEditCommand::Move {
-                nodes: smallvec![node],
-                parent,
-                position: TreeInsertPosition::After(*next),
+                position,
             })
         }
         TreeEditRequest::AddChild { parent } => Some(TreeEditCommand::CreateChild { parent }),
@@ -522,7 +508,7 @@ fn run_app(
     let label = Label;
     let mut state = TreeListViewState::with_capacity(model.size_hint());
     let mut clipboard: Option<usize> = None;
-    expand_all(&mut state, &model);
+    let _ = state.expand_all(&model);
     if let Some(root_id) = model.roots().next() {
         let _ = state.select_by_id(&model, &query, root_id);
     }

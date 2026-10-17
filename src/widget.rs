@@ -192,7 +192,7 @@ where
             header_height,
             selection_width,
         );
-        let viewport_height = usize::from(layout.table.height.saturating_sub(header_height));
+        let viewport_height = usize::from(layout.rows.height);
         state.ensure_selection_visible(viewport_height, self.style.scroll_policy);
         state.clamp_offset_to_viewport(viewport_height);
 
@@ -226,9 +226,7 @@ where
         );
         RenderPlan {
             layout,
-            header_height,
             selection_width,
-            viewport_height,
             column_boxes,
             rows,
         }
@@ -242,9 +240,7 @@ where
     ) {
         let RenderPlan {
             layout,
-            header_height,
             selection_width,
-            viewport_height,
             column_boxes,
             rows: row_window,
         } = plan;
@@ -254,7 +250,7 @@ where
             state.selected_index(),
             state.selected_column(),
             state.draw_lines(),
-            |id| state.mark_state_cached(id),
+            |id| state.mark_state(id),
         );
         let selected = state
             .selected_index()
@@ -292,15 +288,10 @@ where
             state.offset(),
             state.horizontal_offset(),
             state.projection().len(),
-            viewport_height,
         );
         state.hit_map = TreeHitMap {
             table: layout.table,
-            rows: Rect {
-                y: layout.table.y.saturating_add(header_height),
-                height: layout.table.height.saturating_sub(header_height),
-                ..layout.table
-            },
+            rows: layout.rows,
             vertical_scrollbar: layout.vertical_scrollbar,
             horizontal_scrollbar: layout.horizontal_scrollbar,
             range_start: row_window.visible.start,
@@ -374,6 +365,11 @@ where
 
         RenderLayout {
             table,
+            rows: Rect {
+                y: table.y.saturating_add(header_height),
+                height: table.height.saturating_sub(header_height),
+                ..table
+            },
             vertical_scrollbar,
             horizontal_scrollbar,
             virtual_width,
@@ -412,6 +408,7 @@ where
 
 struct RenderLayout {
     table: Rect,
+    rows: Rect,
     vertical_scrollbar: Option<Rect>,
     horizontal_scrollbar: Option<Rect>,
     virtual_width: u16,
@@ -420,9 +417,7 @@ struct RenderLayout {
 
 struct RenderPlan {
     layout: RenderLayout,
-    header_height: u16,
     selection_width: u16,
-    viewport_height: usize,
     column_boxes: SmallVec<[ColumnHitBox; 8]>,
     rows: RowWindow,
 }
@@ -505,9 +500,9 @@ fn render_scrollbars(
     vertical_offset: usize,
     horizontal_offset: u16,
     total_rows: usize,
-    viewport_height: usize,
 ) {
     if let Some(area) = layout.vertical_scrollbar {
+        let viewport_height = usize::from(layout.rows.height);
         let mut scrollbar_state =
             ScrollbarState::new(scrollbar_position_count(total_rows, viewport_height))
                 .position(vertical_offset)
